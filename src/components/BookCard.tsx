@@ -1,5 +1,5 @@
 import { UserBook } from '@/types/book';
-import { Star, BookOpen, MapPin } from 'lucide-react';
+import { Star, BookOpen, MapPin, Book, Headphones, Tablet } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
 interface BookCardProps {
@@ -7,8 +7,14 @@ interface BookCardProps {
   compact?: boolean;
 }
 
+const formatIcons = {
+  physical: { icon: Book, label: 'Physical' },
+  ebook: { icon: Tablet, label: 'eBook' },
+  audiobook: { icon: Headphones, label: 'Audiobook' },
+} as const;
+
 export default function BookCard({ userBook, compact }: BookCardProps) {
-  const { book, readStatus, rating, storageLocation, priority, tags } = userBook;
+  const { book, readStatus, rating, storageLocation, priority, tags, formats } = userBook;
 
   return (
     <div className="group bg-card rounded-lg border border-border shadow-card hover:shadow-card-hover transition-all duration-300 overflow-hidden">
@@ -50,6 +56,19 @@ export default function BookCard({ userBook, compact }: BookCardProps) {
             }>
               {priority}
             </Badge>
+          </div>
+        )}
+        {/* Format icons */}
+        {formats && formats.length > 0 && (
+          <div className="absolute bottom-2 left-2 flex gap-1">
+            {formats.map(f => {
+              const FormatIcon = formatIcons[f].icon;
+              return (
+                <div key={f} className="w-5 h-5 rounded-full bg-card/90 flex items-center justify-center" title={formatIcons[f].label}>
+                  <FormatIcon className="h-3 w-3 text-foreground" />
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

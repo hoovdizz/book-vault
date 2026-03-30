@@ -12,14 +12,14 @@ const books: Book[] = [
 ];
 
 export const mockUserBooks: UserBook[] = [
-  { id: 'ub1', bookId: '1', book: books[0], status: 'owned', readStatus: 'read', rating: 9, purchasePrice: 12.99, storageLocation: 'Living Room Shelf A', tags: ['fantasy', 'favorite'], dateAdded: '2024-01-15', dateRead: '2024-02-20', notes: 'One of the greatest fantasy novels ever written.' },
-  { id: 'ub2', bookId: '2', book: books[1], status: 'owned', readStatus: 'read', rating: 8, purchasePrice: 11.99, storageLocation: 'Living Room Shelf A', tags: ['fantasy'], dateAdded: '2024-01-15', dateRead: '2024-03-10' },
-  { id: 'ub3', bookId: '3', book: books[2], status: 'owned', readStatus: 'unread', purchasePrice: 13.99, storageLocation: 'Living Room Shelf A', tags: ['fantasy'], dateAdded: '2024-01-15' },
-  { id: 'ub4', bookId: '4', book: books[3], status: 'owned', readStatus: 'reading', rating: 7, purchasePrice: 9.99, storageLocation: 'Bedroom Shelf', tags: ['fantasy', 'ya'], dateAdded: '2024-02-01' },
-  { id: 'ub5', bookId: '5', book: books[4], status: 'owned', readStatus: 'read', rating: 10, purchasePrice: 8.99, storageLocation: 'Office Desk', tags: ['classic', 'dystopian', 'favorite'], dateAdded: '2023-12-01', dateRead: '2024-01-05' },
-  { id: 'ub6', bookId: '6', book: books[5], status: 'wishlist', readStatus: 'unread', dateAdded: '2024-03-01' },
-  { id: 'ub7', bookId: '7', book: books[6], status: 'backlog', readStatus: 'unread', priority: 'high', sortOrder: 1, dateAdded: '2024-02-15' },
-  { id: 'ub8', bookId: '8', book: books[7], status: 'backlog', readStatus: 'unread', priority: 'medium', sortOrder: 2, dateAdded: '2024-03-10' },
+  { id: 'ub1', bookId: '1', book: books[0], status: 'owned', readStatus: 'read', formats: ['physical'], rating: 9, purchasePrice: 12.99, storageLocation: 'Living Room Shelf A', tags: ['fantasy', 'favorite'], dateAdded: '2024-01-15', dateRead: '2024-02-20', notes: 'One of the greatest fantasy novels ever written.' },
+  { id: 'ub2', bookId: '2', book: books[1], status: 'owned', readStatus: 'read', formats: ['physical', 'ebook'], rating: 8, purchasePrice: 11.99, storageLocation: 'Living Room Shelf A', tags: ['fantasy'], dateAdded: '2024-01-15', dateRead: '2024-03-10' },
+  { id: 'ub3', bookId: '3', book: books[2], status: 'owned', readStatus: 'unread', formats: ['physical'], purchasePrice: 13.99, storageLocation: 'Living Room Shelf A', tags: ['fantasy'], dateAdded: '2024-01-15' },
+  { id: 'ub4', bookId: '4', book: books[3], status: 'owned', readStatus: 'reading', formats: ['ebook', 'audiobook'], rating: 7, purchasePrice: 9.99, storageLocation: 'Bedroom Shelf', tags: ['fantasy', 'ya'], dateAdded: '2024-02-01' },
+  { id: 'ub5', bookId: '5', book: books[4], status: 'owned', readStatus: 'read', formats: ['physical', 'ebook', 'audiobook'], rating: 10, purchasePrice: 8.99, storageLocation: 'Office Desk', tags: ['classic', 'dystopian', 'favorite'], dateAdded: '2023-12-01', dateRead: '2024-01-05' },
+  { id: 'ub6', bookId: '6', book: books[5], status: 'wishlist', readStatus: 'unread', formats: [], dateAdded: '2024-03-01' },
+  { id: 'ub7', bookId: '7', book: books[6], status: 'backlog', readStatus: 'unread', formats: ['ebook'], priority: 'high', sortOrder: 1, dateAdded: '2024-02-15' },
+  { id: 'ub8', bookId: '8', book: books[7], status: 'backlog', readStatus: 'unread', formats: ['audiobook'], priority: 'medium', sortOrder: 2, dateAdded: '2024-03-10' },
 ];
 
 export const mockSeries: Series[] = [
