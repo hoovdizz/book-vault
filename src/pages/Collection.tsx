@@ -138,7 +138,7 @@ export default function Collection() {
               <div className="flex items-center gap-1">
                 {ub.formats.map(f => {
                   const Icon = f === 'physical' ? Book : f === 'ebook' ? Tablet : Headphones;
-                  return <Icon key={f} className="h-3.5 w-3.5 text-muted-foreground" title={f} />;
+                  return <span key={f} title={f}><Icon className="h-3.5 w-3.5 text-muted-foreground" /></span>;
                 })}
               </div>
               <div className="text-sm text-muted-foreground hidden sm:block">{ub.readStatus}</div>
