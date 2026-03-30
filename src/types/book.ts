@@ -13,12 +13,15 @@ export interface Book {
   description?: string;
 }
 
+export type BookFormat = 'physical' | 'ebook' | 'audiobook';
+
 export interface UserBook {
   id: string;
   bookId: string;
   book: Book;
   status: 'owned' | 'wishlist' | 'backlog';
   readStatus: 'read' | 'unread' | 'reading';
+  formats: BookFormat[];
   rating?: number;
   purchasePrice?: number;
   storageLocation?: string;

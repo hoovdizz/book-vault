@@ -1,11 +1,20 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Heart, Plus, ArrowRight } from 'lucide-react';
 import { mockUserBooks } from '@/data/mockData';
 import BookCard from '@/components/BookCard';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 export default function Wishlist() {
-  const wishlistBooks = mockUserBooks.filter(ub => ub.status === 'wishlist');
+  const [wishlistBooks, setWishlistBooks] = useState(
+    mockUserBooks.filter(ub => ub.status === 'wishlist')
+  );
+
+  const handleMoveToCollection = (id: string) => {
+    setWishlistBooks(prev => prev.filter(ub => ub.id !== id));
+    toast.success('Book moved to your collection!');
+  };
 
   return (
     <div className="space-y-6">
@@ -14,7 +23,11 @@ export default function Wishlist() {
           <h1 className="text-3xl font-heading font-bold text-foreground">Wishlist</h1>
           <p className="text-muted-foreground mt-1">{wishlistBooks.length} books you'd love to own</p>
         </div>
-        <Button className="gradient-warm text-primary-foreground gap-2 w-fit">
+        <Button
+          type="button"
+          className="gradient-warm text-primary-foreground gap-2 w-fit"
+          onClick={() => toast.info('Add to Wishlist dialog coming soon — connect Lovable Cloud for full functionality.')}
+        >
           <Plus className="h-4 w-4" />
           Add to Wishlist
         </Button>
@@ -32,7 +45,13 @@ export default function Wishlist() {
             >
               <BookCard userBook={ub} />
               <div className="mt-2">
-                <Button variant="outline" size="sm" className="w-full text-xs gap-1 border-border text-foreground hover:bg-accent hover:text-accent-foreground">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full text-xs gap-1 border-border text-foreground hover:bg-accent hover:text-accent-foreground"
+                  onClick={() => handleMoveToCollection(ub.id)}
+                >
                   <ArrowRight className="h-3 w-3" />
                   Move to Collection
                 </Button>
