@@ -11,6 +11,7 @@
   <Overview>Self-hosted personal book library with an embedded SQLite database and multiple user accounts.</Overview>
   <Category>Tools: MediaApp:Other</Category>
   <Config Name="Web UI Port" Target="8130" Default="8130" Mode="tcp" Description="BookVault web interface" Type="Port" Display="always" Required="true" Mask="false">8130</Config>
+  <Config Name="Application Port" Target="PORT" Default="8130" Description="Internal BookVault listening port; keep this synchronized with the Web UI container port" Type="Variable" Display="advanced" Required="true" Mask="false">8130</Config>
   <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/book-vault" Mode="rw" Description="SQLite database and persistent application data" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/book-vault</Config>
   <Config Name="Timezone" Target="TZ" Default="America/New_York" Description="Container timezone" Type="Variable" Display="always" Required="true" Mask="false">America/New_York</Config>
   <Config Name="Admin name" Target="ADMIN_NAME" Default="BookVault Admin" Description="Initial administrator display name (first run only)" Type="Variable" Display="always" Required="true" Mask="false">BookVault Admin</Config>

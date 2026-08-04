@@ -85,7 +85,35 @@ curl --fail --location \
   --output /boot/config/plugins/dockerMan/templates-user/my-book-vault.xml
 ```
 
-In **Docker**, edit BookVault and change both the container and host web port to `8130`, then select **Apply**. Do not add a `--user` override: the entrypoint starts briefly as root to repair ownership of the dedicated `/config` mount and drops to the unprivileged `node` user before BookVault starts.
+Updating a template does not change an already-created container. If the Docker page still shows TCP port `3000`, fix the existing container:
+
+1. Select the BookVault icon and choose **Edit**.
+2. Find the existing Web UI port entry.
+3. Change both **Container Port** and **Host Port** from `3000` to `8130`. If Unraid does not allow the container-port field to be edited, remove that port entry and add a new **Port** entry with container port `8130`, host port `8130`, and TCP protocol.
+4. In advanced view, remove any `PORT=3000` variable and add or change `PORT` to `8130`.
+5. Confirm the WebUI field is `http://[IP]:[PORT:8130]`.
+6. Select **Apply** so Unraid recreates the container. The `/config` appdata mapping preserves the database.
+
+Verify the published port from the terminal:
+
+```sh
+docker port book-vault
+```
+
+The result should include:
+
+```text
+8130/tcp -> 0.0.0.0:8130
+```
+
+Do not add a `--user` override: the entrypoint starts briefly as root to repair ownership of the dedicated `/config` mount and drops to the unprivileged `node` user before BookVault starts.
+
+The following log output is normal and confirms the application started:
+
+```text
+(node:1) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+BookVault listening on http://0.0.0.0:8130
+```
 
 ### Database permission error
 
