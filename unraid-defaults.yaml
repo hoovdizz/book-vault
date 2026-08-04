@@ -13,6 +13,8 @@ paths:
     access: read-write
 environment:
   TZ: America/New_York
+  PUID: "99"
+  PGID: "100"
   DATABASE_PATH: /config/book-vault.sqlite
   SESSION_DAYS: "30"
   ADMIN_NAME: bookvaultadmin

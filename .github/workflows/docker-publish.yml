@@ -32,6 +32,39 @@ jobs:
           tags: ${{ env.IMAGE_TAG }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Test container health and Unraid ownership
+        shell: bash
+        run: |
+          config_dir="$(mktemp -d)"
+          container_name="book-vault-smoke-${GITHUB_RUN_ID}"
+          cleanup() {
+            docker logs "$container_name" || true
+            docker rm --force "$container_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run --detach \
+            --name "$container_name" \
+            --volume "$config_dir:/config" \
+            --env PUID=99 \
+            --env PGID=100 \
+            --env ADMIN_NAME=bookvaultadmin \
+            --env ADMIN_EMAIL=admin@bookvault.local \
+            --env ADMIN_PASSWORD=bookvaultpassword \
+            "$IMAGE_TAG"
+
+          healthy=false
+          for _ in {1..30}; do
+            if docker exec "$container_name" wget -q -O - http://127.0.0.1:8130/api/health | grep -q '"status":"ok"'; then
+              healthy=true
+              break
+            fi
+            sleep 1
+          done
+
+          test "$healthy" = "true"
+          test "$(stat -c '%u:%g' "$config_dir")" = "99:100"
+          test "$(stat -c '%u:%g' "$config_dir/book-vault.sqlite")" = "99:100"
       - name: Scan image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

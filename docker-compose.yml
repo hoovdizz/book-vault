@@ -11,6 +11,8 @@ services:
     environment:
       TZ: America/New_York
       PORT: "8130"
+      PUID: "${PUID:-99}"
+      PGID: "${PGID:-100}"
       DATABASE_PATH: /config/book-vault.sqlite
       ADMIN_NAME: bookvaultadmin
       ADMIN_EMAIL: "${ADMIN_EMAIL:?Set ADMIN_EMAIL in your environment}"

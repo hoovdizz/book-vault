@@ -11,6 +11,8 @@ BookVault is a self-hosted personal book-library interface packaged as one light
 | Container port | `8130` | Web interface and API |
 | `/config` | required | Persistent SQLite database location |
 | `TZ` | `America/New_York` | Container timezone |
+| `PUID` | `99` | Runtime user and `/config` owner (`nobody` on Unraid) |
+| `PGID` | `100` | Runtime group and `/config` group (`users` on Unraid) |
 | `ADMIN_NAME` | `bookvaultadmin` | Initial admin name, used only with a new database |
 | `ADMIN_EMAIL` | `admin@bookvault.local` in the Unraid template | Initial admin login, used only with a new database |
 | `ADMIN_PASSWORD` | `bookvaultpassword` in the Unraid template | Initial 12–128 character admin password |
@@ -66,6 +68,8 @@ Use **Add another Path, Port, Variable, Label or Device** to add:
 | Port | Web UI | `8130` | `8130` |
 | Path | Appdata | `/config` | `/mnt/user/appdata/book-vault` |
 | Variable | Timezone | `TZ` | `America/New_York` |
+| Variable | User ID | `PUID` | `99` (`nobody` on Unraid) |
+| Variable | Group ID | `PGID` | `100` (`users` on Unraid) |
 | Variable | Admin name | `ADMIN_NAME` | `bookvaultadmin` |
 | Variable | Admin email | `ADMIN_EMAIL` | `admin@bookvault.local` |
 | Variable | Admin password | `ADMIN_PASSWORD` | `bookvaultpassword` (change before first launch) |
@@ -107,7 +111,19 @@ The result should include:
 8130/tcp -> 0.0.0.0:8130
 ```
 
-Do not add a `--user` override: the entrypoint starts briefly as root to repair ownership of the dedicated `/config` mount and drops to the unprivileged `node` user before BookVault starts.
+Do not add a `--user` override: the entrypoint starts briefly as root to repair ownership of the dedicated `/config` mount and then drops to `PUID:PGID` before BookVault starts. The Unraid defaults are `99:100`, which appear on the host as `nobody:users`.
+
+Verify the host ownership after recreating the container:
+
+```sh
+stat -c '%U:%G (%u:%g)' /mnt/user/appdata/book-vault
+```
+
+The expected result is:
+
+```text
+nobody:users (99:100)
+```
 
 The following log output is normal and confirms the application started:
 
@@ -170,6 +186,8 @@ docker run -d \
   -p 8130:8130 \
   -v /mnt/user/appdata/book-vault:/config \
   -e TZ=America/New_York \
+  -e PUID=99 \
+  -e PGID=100 \
   -e ADMIN_EMAIL=admin@example.com \
   -e ADMIN_PASSWORD='replace-with-a-long-password' \
   ghcr.io/hoovdizz/book-vault:development

@@ -12,6 +12,8 @@ LABEL org.opencontainers.image.title="BookVault" \
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8130 \
+    PUID=99 \
+    PGID=100 \
     DATABASE_PATH=/config/book-vault.sqlite \
     SESSION_DAYS=30
 WORKDIR /app
@@ -24,7 +26,8 @@ RUN apk add --no-cache su-exec \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
     && chmod 0755 /usr/local/bin/book-vault-entrypoint \
     && mkdir -p /config \
-    && chown -R node:node /app /config
+    && chown -R node:node /app \
+    && chown -R 99:100 /config
 EXPOSE 8130
 VOLUME ["/config"]
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \

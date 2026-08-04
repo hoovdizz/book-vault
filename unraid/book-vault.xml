@@ -15,6 +15,8 @@
   <Config Name="Application Port" Target="PORT" Default="8130" Description="Internal BookVault listening port; keep this set to 8130" Type="Variable" Display="advanced" Required="true" Mask="false">8130</Config>
   <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/book-vault" Mode="rw" Description="SQLite database and persistent application data" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/book-vault</Config>
   <Config Name="Timezone" Target="TZ" Default="America/New_York" Description="Container timezone" Type="Variable" Display="always" Required="true" Mask="false">America/New_York</Config>
+  <Config Name="User ID" Target="PUID" Default="99" Description="Unraid nobody user ID; owns files under /config" Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="Group ID" Target="PGID" Default="100" Description="Unraid users group ID; owns files under /config" Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
   <Config Name="Admin name" Target="ADMIN_NAME" Default="bookvaultadmin" Description="Initial administrator display name (first run only)" Type="Variable" Display="always" Required="true" Mask="false">bookvaultadmin</Config>
   <Config Name="Admin email" Target="ADMIN_EMAIL" Default="admin@bookvault.local" Description="Initial administrator email (first run only)" Type="Variable" Display="always" Required="true" Mask="false">admin@bookvault.local</Config>
   <Config Name="Admin password" Target="ADMIN_PASSWORD" Default="bookvaultpassword" Description="Initial administrator password (first run only; change before first launch)" Type="Variable" Display="always-hide" Required="true" Mask="true">bookvaultpassword</Config>
