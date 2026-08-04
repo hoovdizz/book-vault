@@ -86,11 +86,11 @@ The admin environment variables create the first account only when the database 
 
 ### Add books
 
-Open **Collection → Add Book** or **Wishlist → Add to Wishlist** and search with a title, ISBN-10, or ISBN-13. Both buttons use the same provider search, metadata, and cover-selection flow; the Wishlist button automatically saves the book with a wishlist status. Select a result, choose a cover, then optionally record its collection, series, series position, format, binding, and edition before saving. Use **Move to Collection** on a wishlist title after purchasing it; the change is persisted in SQLite.
+Open **Collection → Add Book** or **Wishlist → Add to Wishlist** and search with a title, ISBN-10, or ISBN-13. Select the camera button to scan the 978/979 ISBN barcode with a phone. Live scanning uses the rear camera over HTTPS; when BookVault is opened over plain HTTP, use **Take or choose barcode photo** instead. The photo is decoded locally in the browser and is never uploaded. Both add buttons use the same provider search, metadata, and cover-selection flow; the Wishlist button automatically saves the book with a wishlist status. Select a result, choose a cover, then optionally record its collection, series, series position, format, binding, and edition before saving. Use **Move to Collection** on a wishlist title after purchasing it; the change is persisted in SQLite.
 
 Click any persisted book card to edit its metadata, cover, format, Collection/Wishlist/Backlog location, and **Unread / Currently reading / Read** status. Each physical copy can also record its binding, edition, condition grade, free-form damage notes such as bent corners or a broken spine, and whether it is loaned out. A loan can include the borrower's name and loan date. Loaned books have a visible badge and are counted on the Dashboard. The **More** button in the editor repeats the provider lookup and adds newly found cover editions without discarding the current cover.
 
-Open **Series → Add Book Series**, search by series name, and review the returned volumes. Mark each new title as **Collection**, **Wishlist**, or **Skip**, or use the bulk selection buttons, then import the selected rows together. Existing ISBN/title matches are identified and are not duplicated.
+Open **Series → Add Book Series**, choose **Auto**, **Hardcover**, or **Open Library**, search by series name, and review the returned volumes. Hardcover is the preferred source for exact series positions and requires `HARDCOVER_API_TOKEN`. Auto tries Hardcover when configured and falls back to Open Library. Open Library positions are read from its series metadata when present; missing positions are inferred from publication order. Every position is populated and remains editable before import. Mark each new title as **Collection**, **Wishlist**, or **Skip**, or use the bulk selection buttons, then import the selected rows together. Existing ISBN/title matches are identified and are not duplicated.
 
 Open **Duplicates** and select **Run duplicate scan** to find works with two or more owned copies. Matching is intentionally independent of ISBN, binding, and edition, so hardcover, paperback, limited, first-edition, and reprint copies can appear together. Common edition wording and punctuation differences are normalized, and author word order is ignored. Wishlist and backlog entries are excluded because they are not owned copies. Click any result to correct its copy details, then select **Rerun scan**.
 
@@ -105,7 +105,7 @@ An API key is not required, but Google may apply lower anonymous quotas. Add a r
 
 Book metadata and cover links come from the [Google Books API](https://developers.google.com/books/docs/v1/using), [Open Library Search and Covers APIs](https://openlibrary.org/developers/api), and optionally the [Hardcover GraphQL API](https://docs.hardcover.app/api/getting-started/).
 
-Goodreads is not used as a cover source because it [stopped issuing public developer keys and is retiring its API](https://www.goodreads.com/group/show/8095-goodreads-developers), while its current terms prohibit automated data gathering and copying its images. Hardcover is the supported Goodreads-style catalog replacement. To enable it:
+Goodreads is shown as unavailable rather than used as a cover or series source because it [stopped issuing public developer keys and is retiring its API](https://www.goodreads.com/group/show/8095-goodreads-developers), while its [current terms prohibit automated collection and data extraction](https://www.goodreads.com/about/terms). Hardcover is the supported Goodreads-style catalog replacement. To enable it:
 
 1. Create or sign in to a Hardcover account and copy the token from **Account Settings → Hardcover API**.
 2. Edit the BookVault container in Unraid.
@@ -117,7 +117,7 @@ Hardcover tokens expire annually. If Hardcover cover enrichment stops working, r
 Authenticated book endpoints:
 
 - `GET /api/book-search?q=...&type=auto|title|isbn` searches the metadata providers.
-- `GET /api/series-search?q=...` finds the books in a series, using Hardcover when configured and Open Library otherwise.
+- `GET /api/series-search?q=...&provider=auto|hardcover|open_library` finds and positions the books in a series using the selected source.
 - `GET /api/books?q=...` lists the signed-in user's books and optionally searches title, author, ISBN, collection, or series.
 - `GET /api/books/duplicates` scans the signed-in user's owned books for duplicate works across editions and bindings.
 - `POST /api/books` validates and stores a book for the signed-in user.
@@ -147,6 +147,14 @@ Updating a template does not change an already-created container. Unraid keeps t
 4. In advanced view, remove any `PORT=3000` variable and add or change `PORT` to `8130`.
 5. Confirm the WebUI field is `http://[IP]:[PORT:8130]`.
 6. Select **Apply** so Unraid recreates the container. The `/config` appdata mapping preserves the database.
+
+The current Docker icon URL is:
+
+```text
+https://raw.githubusercontent.com/hoovdizz/book-vault/development/public/book-vault-icon.png
+```
+
+The refreshed template supplies it automatically. If an existing container keeps its old or generic icon, open **Edit → Advanced View**, paste that address into **Icon URL**, select **Apply**, and refresh the Docker page. Browsers can also cache the favicon; a hard refresh loads the matching BookVault icon.
 
 Verify the published port from the terminal:
 

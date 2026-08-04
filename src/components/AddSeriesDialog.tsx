@@ -18,6 +18,7 @@ import {
 import { Input } from '@/components/ui/input';
 
 type Choice = 'skip' | 'owned' | 'wishlist';
+type SeriesProvider = 'auto' | 'hardcover' | 'open_library';
 type SeriesResponse = { seriesName: string; provider: string; books: BookSearchResult[] };
 
 function identity(book: Pick<BookSearchResult, 'title' | 'author' | 'isbn'>) {
@@ -40,8 +41,10 @@ export default function AddSeriesDialog({
 }) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
+  const [provider, setProvider] = useState<SeriesProvider>('auto');
   const [result, setResult] = useState<SeriesResponse | null>(null);
   const [choices, setChoices] = useState<Record<string, Choice>>({});
+  const [positions, setPositions] = useState<Record<string, string>>({});
   const [searching, setSearching] = useState(false);
   const [importing, setImporting] = useState(false);
 
@@ -56,6 +59,7 @@ export default function AddSeriesDialog({
       setQuery('');
       setResult(null);
       setChoices({});
+      setPositions({});
       setSearching(false);
       setImporting(false);
     }
@@ -67,10 +71,17 @@ export default function AddSeriesDialog({
     setSearching(true);
     setResult(null);
     setChoices({});
+    setPositions({});
     try {
-      const response = await api<SeriesResponse>(`/api/series-search?q=${encodeURIComponent(query.trim())}`);
+      const response = await api<SeriesResponse>(
+        `/api/series-search?q=${encodeURIComponent(query.trim())}&provider=${provider}`,
+      );
       setResult(response);
       setChoices(Object.fromEntries(response.books.map((book, index) => [rowKey(book, index), 'skip'])));
+      setPositions(Object.fromEntries(response.books.map((book, index) => [
+        rowKey(book, index),
+        book.seriesNumber == null ? String(index + 1) : String(book.seriesNumber),
+      ])));
       if (!response.books.length) toast.info('No books were found for that series');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Series search failed');
@@ -96,6 +107,7 @@ export default function AddSeriesDialog({
         ...book,
         status,
         series: result.seriesName,
+        seriesNumber: positions[rowKey(book, index)] || null,
         formats: ['physical'],
         readStatus: 'unread',
       }];
@@ -134,15 +146,41 @@ export default function AddSeriesDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={search} className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input value={query} onChange={event => setQuery(event.target.value)} maxLength={150} className="pl-9" placeholder="Series name, e.g. The Expanse" autoFocus />
+        <form onSubmit={search} className="space-y-3">
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Series source">
+            {([
+              ['auto', 'Auto'],
+              ['hardcover', 'Hardcover'],
+              ['open_library', 'Open Library'],
+            ] as const).map(([value, label]) => (
+              <Button
+                key={value}
+                type="button"
+                size="sm"
+                variant={provider === value ? 'default' : 'outline'}
+                aria-pressed={provider === value}
+                onClick={() => setProvider(value)}
+              >
+                {label}{value === 'hardcover' && ' · best positions'}
+              </Button>
+            ))}
+            <Button type="button" size="sm" variant="outline" disabled title="Goodreads retired its public API">
+              Goodreads · unavailable
+            </Button>
           </div>
-          <Button type="submit" disabled={searching || !query.trim()}>
-            {searching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-            Find series
-          </Button>
+          <p className="text-xs text-muted-foreground">
+            Goodreads no longer provides a supported public API. Auto uses Hardcover when its token is configured, then Open Library.
+          </p>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input value={query} onChange={event => setQuery(event.target.value)} maxLength={150} className="pl-9" placeholder="Series name, e.g. The Expanse" autoFocus />
+            </div>
+            <Button type="submit" disabled={searching || !query.trim()}>
+              {searching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+              Find series
+            </Button>
+          </div>
         </form>
 
         {result && (
@@ -151,6 +189,9 @@ export default function AddSeriesDialog({
               <div>
                 <h3 className="font-heading font-semibold">{result.seriesName}</h3>
                 <p className="text-sm text-muted-foreground">{result.books.length} books found via {result.provider}</p>
+                {result.provider === 'Open Library' && (
+                  <p className="mt-1 text-xs text-muted-foreground">Missing positions are inferred from publication order and can be corrected below.</p>
+                )}
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button type="button" size="sm" variant="outline" onClick={() => setAll('owned')}>All Collection</Button>
@@ -175,11 +216,21 @@ export default function AddSeriesDialog({
                     </div>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        {book.seriesNumber && <Badge variant="secondary">#{book.seriesNumber}</Badge>}
+                        {positions[key] && <Badge variant="secondary">#{positions[key]}</Badge>}
                         <h4 className="font-heading font-semibold">{book.title}</h4>
                       </div>
                       <p className="text-sm text-muted-foreground">{book.author}</p>
                       {book.isbn && <p className="text-xs text-muted-foreground">ISBN {book.isbn}</p>}
+                      <div className="mt-2 flex max-w-48 items-center gap-2">
+                        <label htmlFor={`series-position-${index}`} className="whitespace-nowrap text-xs text-muted-foreground">Series position</label>
+                        <Input
+                          id={`series-position-${index}`}
+                          value={positions[key] || ''}
+                          maxLength={30}
+                          className="h-8 w-20"
+                          onChange={event => setPositions(current => ({ ...current, [key]: event.target.value }))}
+                        />
+                      </div>
                     </div>
                     {existing ? (
                       <Badge variant="outline">

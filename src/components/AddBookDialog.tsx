@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
-import { BookOpen, Check, ImageOff, Loader2, Search } from 'lucide-react';
+import { BookOpen, Camera, Check, ImageOff, Loader2, Search } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/auth';
@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import IsbnScannerDialog from '@/components/IsbnScannerDialog';
 
 type SearchType = 'auto' | 'title' | 'isbn';
 type Providers = {
@@ -156,6 +157,7 @@ export default function AddBookDialog({
   const [providers, setProviders] = useState<Providers | null>(null);
   const [searched, setSearched] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   const sourceMessage = useMemo(() => {
     if (!providers) return '';
@@ -179,6 +181,7 @@ export default function AddBookDialog({
     setProviders(null);
     setSearched(false);
     setDraft(emptyDraft);
+    setScannerOpen(false);
   }
 
   function handleOpenChange(next: boolean) {
@@ -188,7 +191,11 @@ export default function AddBookDialog({
 
   async function searchBooks(event: FormEvent) {
     event.preventDefault();
-    if (!query.trim()) {
+    await runSearch(query, searchType);
+  }
+
+  async function runSearch(searchQuery: string, type: SearchType) {
+    if (!searchQuery.trim()) {
       toast.error('Enter a book title or ISBN');
       return;
     }
@@ -198,7 +205,7 @@ export default function AddBookDialog({
     setProviders(null);
     try {
       const response = await api<SearchResponse>(
-        `/api/book-search?q=${encodeURIComponent(query.trim())}&type=${searchType}`,
+        `/api/book-search?q=${encodeURIComponent(searchQuery.trim())}&type=${type}`,
       );
       setResults(response.results);
       setProviders(response.providers);
@@ -208,6 +215,13 @@ export default function AddBookDialog({
     } finally {
       setSearching(false);
     }
+  }
+
+  function handleScannedIsbn(isbn: string) {
+    setQuery(isbn);
+    setSearchType('isbn');
+    toast.success(`Scanned ISBN ${isbn}`);
+    void runSearch(isbn, 'isbn');
   }
 
   function selectResult(result: BookSearchResult) {
@@ -287,8 +301,9 @@ export default function AddBookDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto">
+    <>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {step === 'search'
@@ -337,6 +352,9 @@ export default function AddBookDialog({
                     placeholder={searchType === 'isbn' ? '9780261103573' : 'Book title or ISBN'}
                   />
                 </div>
+                <Button type="button" variant="outline" size="icon" aria-label="Scan ISBN with camera" title="Scan ISBN with camera" onClick={() => setScannerOpen(true)}>
+                  <Camera className="h-4 w-4" />
+                </Button>
                 <Button type="submit" disabled={searching}>
                   {searching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
                   Search
@@ -546,7 +564,9 @@ export default function AddBookDialog({
             </DialogFooter>
           </form>
         )}
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+      <IsbnScannerDialog open={scannerOpen} onOpenChange={setScannerOpen} onDetected={handleScannedIsbn} />
+    </>
   );
 }

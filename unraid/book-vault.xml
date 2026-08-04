@@ -9,6 +9,7 @@
   <Shell>sh</Shell>
   <Support>https://github.com/hoovdizz/book-vault/issues</Support>
   <Project>https://github.com/hoovdizz/book-vault</Project>
+  <Icon>https://raw.githubusercontent.com/hoovdizz/book-vault/development/public/book-vault-icon.png</Icon>
   <Overview>Self-hosted personal book library with an embedded SQLite database and multiple user accounts.</Overview>
   <Category>Tools: MediaApp:Other</Category>
   <Config Name="Web UI Port" Target="8130" Default="8130" Mode="tcp" Description="BookVault web interface (host 8130 to container 8130)" Type="Port" Display="always" Required="true" Mask="false">8130</Config>

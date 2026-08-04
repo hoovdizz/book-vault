@@ -3,6 +3,8 @@ services:
     build: .
     image: ghcr.io/hoovdizz/book-vault:development
     container_name: book-vault
+    labels:
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/hoovdizz/book-vault/development/public/book-vault-icon.png"
     restart: unless-stopped
     ports:
       - "8130:8130"

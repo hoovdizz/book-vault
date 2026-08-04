@@ -71,6 +71,21 @@ afterAll(async () => {
 });
 
 describe("books API", () => {
+  it("allows camera access only for the BookVault origin", async () => {
+    const response = await fetch(`${baseUrl}/api/health`);
+    expect(response.headers.get("permissions-policy")).toContain("camera=(self)");
+    expect(response.headers.get("permissions-policy")).toContain("microphone=()");
+    expect(response.headers.get("content-security-policy")).toContain("img-src 'self' data: blob:");
+  });
+
+  it("rejects unsupported series providers without making an external request", async () => {
+    const response = await fetch(`${baseUrl}/api/series-search?q=Reader%20Series&provider=goodreads`, {
+      headers: { Cookie: cookie },
+    });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Invalid series provider" });
+  });
+
   it("migrates existing databases with the copy-detail fields", () => {
     const columns = new Set(db.prepare("PRAGMA table_info(books)").all().map(column => column.name));
     for (const column of ["binding", "edition", "condition_grade", "condition_notes", "loaned_out", "loaned_to", "loaned_at"]) {

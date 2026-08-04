@@ -24,7 +24,7 @@ function year(value) {
 
 export function normalizeIsbn(value) {
   const normalized = String(value || "").toUpperCase().replace(/[^0-9X]/g, "");
-  if (/^\d{13}$/.test(normalized)) {
+  if (/^97[89]\d{10}$/.test(normalized)) {
     const sum = [...normalized].reduce((total, digit, index) => total + Number(digit) * (index % 2 ? 3 : 1), 0);
     return sum % 10 === 0 ? normalized : "";
   }
@@ -324,15 +324,44 @@ async function lookupHardcoverBooks(query, token, timeoutMs) {
   return normalizeHardcoverBooks(booksPayload);
 }
 
-function inferredSeriesPosition(seriesValues, seriesName) {
+function inferredSeriesPosition(seriesValues, seriesName, title = "") {
   const matching = (Array.isArray(seriesValues) ? seriesValues : [])
     .find(value => cleanText(value, 200).toLocaleLowerCase().includes(seriesName.toLocaleLowerCase()));
-  const match = cleanText(matching, 200).match(/(?:#|book\s+)?(\d+(?:\.\d+)?)\s*$/i);
-  return match?.[1];
+  const value = cleanText(matching, 200);
+  const marked = value.match(/(?:#|\bbook\s*|\bvol(?:ume)?\.?\s*)(\d+(?:\.\d+)?)\b/i)
+    || cleanText(title, 300).match(/(?:#|\bbook\s*|\bvol(?:ume)?\.?\s*)(\d+(?:\.\d+)?)\b/i);
+  const trailing = value.match(/(?:[,;:\s]|^)(\d+(?:\.\d+)?)\s*$/);
+  return marked?.[1] || trailing?.[1];
 }
 
 function seriesBaseName(value) {
-  return cleanText(value, 150).replace(/\s*(?:#|book\s+)\d+(?:\.\d+)?\s*$/i, "").trim();
+  return cleanText(value, 150)
+    .replace(/\s*[,;:-]?\s*(?:#|book\s*|vol(?:ume)?\.?\s*)?\d+(?:\.\d+)?\s*$/i, "")
+    .trim();
+}
+
+function withInferredSeriesPositions(books) {
+  const decorated = books.map((book, index) => ({ book, index }));
+  decorated.sort((left, right) => {
+    const leftPosition = Number(left.book.seriesNumber);
+    const rightPosition = Number(right.book.seriesNumber);
+    if (Number.isFinite(leftPosition) && Number.isFinite(rightPosition)) return leftPosition - rightPosition;
+    const leftYear = Number(left.book.publishedYear) || Number.MAX_SAFE_INTEGER;
+    const rightYear = Number(right.book.publishedYear) || Number.MAX_SAFE_INTEGER;
+    return leftYear - rightYear || left.index - right.index;
+  });
+  const used = new Set(decorated
+    .map(item => Number(item.book.seriesNumber))
+    .filter(value => Number.isInteger(value) && value > 0));
+  let nextPosition = 1;
+  return decorated.map(({ book }) => {
+    if (book.seriesNumber) return book;
+    while (used.has(nextPosition)) nextPosition += 1;
+    const seriesNumber = String(nextPosition);
+    used.add(nextPosition);
+    nextPosition += 1;
+    return { ...book, seriesNumber };
+  });
 }
 
 function normalizeOpenLibrarySeries(payload, requestedSeries) {
@@ -348,7 +377,7 @@ function normalizeOpenLibrarySeries(payload, requestedSeries) {
     normalizeOpenLibraryDocs({ docs: [document] }).map(result => ({
       ...result,
       series: seriesName,
-      seriesNumber: inferredSeriesPosition(document.series, seriesName),
+      seriesNumber: inferredSeriesPosition(document.series, seriesName, document.title),
       coverUrl: result.coverOptions[0]?.url,
     }))
   );
@@ -364,7 +393,7 @@ async function lookupOpenLibrarySeries(query, timeoutMs) {
     "key,title,author_name,isbn,first_publish_year,publisher,number_of_pages_median,cover_i,editions,series,subject,first_sentence",
   );
   const payload = await fetchJson(url, "Open Library", timeoutMs);
-  const books = normalizeOpenLibrarySeries(payload, query);
+  const books = withInferredSeriesPositions(normalizeOpenLibrarySeries(payload, query));
   return {
     seriesName: books[0]?.series || query,
     books,
@@ -459,11 +488,21 @@ export async function lookupSeries(query, options = {}) {
   const timeoutMs = Number.isFinite(requestedTimeout)
     ? Math.min(10_000, Math.max(2_000, requestedTimeout))
     : 6_000;
-  if (options.hardcoverToken) {
+  const provider = ["auto", "hardcover", "open_library"].includes(options.provider)
+    ? options.provider
+    : "auto";
+  if (provider === "hardcover" && !options.hardcoverToken) {
+    throw Object.assign(new Error("Hardcover series search requires HARDCOVER_API_TOKEN in the container settings"), { status: 400 });
+  }
+  if (provider !== "open_library" && options.hardcoverToken) {
     try {
       const hardcover = await lookupHardcoverSeries(cleanQuery, options.hardcoverToken, timeoutMs);
-      if (hardcover.books.length) return hardcover;
-    } catch {
+      if (hardcover.books.length || provider === "hardcover") return hardcover;
+    } catch (error) {
+      if (provider === "hardcover") {
+        if (!error.status) error.status = 502;
+        throw error;
+      }
       // Open Library remains available when the optional Hardcover integration fails.
     }
   }

@@ -18,6 +18,7 @@ describe("book search normalization", () => {
     expect(normalizeIsbn("0-261-10357-1")).toBe("0261103571");
     expect(isIsbnQuery("9780261103573")).toBe(true);
     expect(normalizeIsbn("9780261103574")).toBe("");
+    expect(normalizeIsbn("4006381333931")).toBe("");
   });
 
   it("normalizes Google metadata and upgrades cover URLs to HTTPS", () => {
@@ -159,21 +160,50 @@ describe("book search normalization", () => {
       status: 200,
       headers: { get: () => null },
       text: async () => JSON.stringify({
-        docs: [{
-          key: "/works/OL1W",
-          title: "Series Book One",
-          author_name: ["Reader Author"],
-          isbn: ["9780261103573"],
-          series: ["Reader Series #1"],
-          cover_i: 14627060,
-        }],
+        docs: [
+          {
+            key: "/works/OL1W",
+            title: "Series Book One",
+            author_name: ["Reader Author"],
+            isbn: ["9780261103573"],
+            first_publish_year: 2001,
+            series: ["Reader Series #1"],
+            cover_i: 14627060,
+          },
+          {
+            key: "/works/OL2W",
+            title: "Series Book Two",
+            author_name: ["Reader Author"],
+            isbn: ["9780306406157"],
+            first_publish_year: 2002,
+            series: ["Reader Series"],
+          },
+        ],
       }),
     })));
-    const response = await lookupSeries("Reader Series");
+    const response = await lookupSeries("Reader Series", { provider: "open_library" });
     expect(response.provider).toBe("Open Library");
-    expect(response.books[0]).toMatchObject({
-      title: "Series Book One",
-      seriesNumber: "1",
-    });
+    expect(response.books.map(book => ({ title: book.title, seriesNumber: book.seriesNumber }))).toEqual([
+      { title: "Series Book One", seriesNumber: "1" },
+      { title: "Series Book Two", seriesNumber: "2" },
+    ]);
+  });
+
+  it("requires a configured token when Hardcover is selected explicitly", async () => {
+    await expect(lookupSeries("Reader Series", { provider: "hardcover" }))
+      .rejects.toMatchObject({ status: 400 });
+  });
+
+  it("reports an explicit Hardcover provider failure without silently changing sources", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      headers: { get: () => null },
+      text: async () => "",
+    })));
+    await expect(lookupSeries("Reader Series", {
+      provider: "hardcover",
+      hardcoverToken: "test-token",
+    })).rejects.toMatchObject({ status: 502 });
   });
 });

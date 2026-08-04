@@ -1,4 +1,4 @@
-import { BookOpen, Library, ListTodo, Heart, Layers, BarChart3, User, Search, Copy } from 'lucide-react';
+import { Library, ListTodo, Heart, Layers, BarChart3, User, Search, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Link, usePathname } from '@/lib/router';
 
@@ -19,7 +19,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Sidebar */}
       <aside className="hidden md:flex w-64 flex-col gradient-sidebar border-r border-sidebar-border">
         <div className="flex items-center gap-3 px-6 py-6 border-b border-sidebar-border">
-          <BookOpen className="h-7 w-7 text-sidebar-primary" />
+          <img src="/book-vault-icon.png" alt="" className="h-8 w-8 rounded-md" />
           <h1 className="text-xl font-heading font-bold text-sidebar-foreground">BookVault</h1>
         </div>
 
@@ -67,7 +67,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-sidebar gradient-sidebar border-b border-sidebar-border">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">
-            <BookOpen className="h-5 w-5 text-sidebar-primary" />
+            <img src="/book-vault-icon.png" alt="" className="h-6 w-6 rounded" />
             <span className="font-heading font-bold text-sidebar-foreground">BookVault</span>
           </div>
         </div>

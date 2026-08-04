@@ -8,7 +8,8 @@ RUN npm run build
 FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
 LABEL org.opencontainers.image.title="BookVault" \
       org.opencontainers.image.description="Self-hosted personal book library" \
-      org.opencontainers.image.source="https://github.com/hoovdizz/book-vault"
+      org.opencontainers.image.source="https://github.com/hoovdizz/book-vault" \
+      net.unraid.docker.icon="https://raw.githubusercontent.com/hoovdizz/book-vault/development/public/book-vault-icon.png"
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8130 \

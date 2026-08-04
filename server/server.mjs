@@ -21,9 +21,9 @@ const bookLookupAttempts = new Map();
 const bookLookupCache = new Map();
 const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".png": "image/png" };
 const securityHeaders = {
-  "Content-Security-Policy": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: https://images.unsplash.com https://books.google.com https://books.googleusercontent.com https://covers.openlibrary.org https://assets.hardcover.app; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'",
+  "Content-Security-Policy": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob: https://images.unsplash.com https://books.google.com https://books.googleusercontent.com https://covers.openlibrary.org https://assets.hardcover.app; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'",
   "Referrer-Policy": "no-referrer",
-  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  "Permissions-Policy": "camera=(self), microphone=(), geolocation=()",
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
   "Cross-Origin-Opener-Policy": "same-origin",
@@ -365,6 +365,10 @@ async function api(req, res, url) {
   }
   if (req.method === "GET" && url.pathname === "/api/series-search") {
     const query = String(url.searchParams.get("q") || "").trim().slice(0, 150);
+    const provider = String(url.searchParams.get("provider") || "auto");
+    if (!["auto", "hardcover", "open_library"].includes(provider)) {
+      return send(res, 400, { error: "Invalid series provider" });
+    }
     const limitKey = `${user.id}:${clientAddress(req)}`;
     if (!consumeLimit(bookLookupAttempts, limitKey, bookLookupLimit, bookLookupWindowMs)) {
       audit("series_lookup_rate_limited", req, { userId: user.id });
@@ -373,8 +377,9 @@ async function api(req, res, url) {
     const result = await lookupSeries(query, {
       hardcoverToken: process.env.HARDCOVER_API_TOKEN,
       timeoutMs: process.env.BOOK_LOOKUP_TIMEOUT_MS,
+      provider,
     });
-    audit("series_lookup", req, { userId: user.id, provider: result.provider, resultCount: result.books.length });
+    audit("series_lookup", req, { userId: user.id, requestedProvider: provider, provider: result.provider, resultCount: result.books.length });
     return send(res, 200, result);
   }
   if (req.method === "GET" && url.pathname === "/api/books/duplicates") {

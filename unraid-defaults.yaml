@@ -3,6 +3,7 @@ repository: ghcr.io/hoovdizz/book-vault
 tag: development
 network: bridge
 web_ui: http://[IP]:[PORT:8130]
+icon: https://raw.githubusercontent.com/hoovdizz/book-vault/development/public/book-vault-icon.png
 ports:
   - container: 8130
     host: 8130
