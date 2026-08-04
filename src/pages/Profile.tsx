@@ -59,7 +59,7 @@ export default function Profile() {
         <form onSubmit={addUser} className="grid gap-3 sm:grid-cols-2">
           <Input placeholder="Display name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
           <Input type="email" placeholder="Email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required />
-          <Input type="password" minLength={8} placeholder="Password (8+ characters)" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required />
+          <Input type="password" minLength={12} maxLength={128} placeholder="Password (12+ characters)" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required />
           <select className="rounded-md border bg-background px-3 text-sm" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}><option value="user">User</option><option value="admin">Administrator</option></select>
           <Button className="sm:col-span-2 w-fit">Add user</Button>
         </form>

@@ -15,5 +15,5 @@
   <Config Name="Timezone" Target="TZ" Default="America/New_York" Description="Container timezone" Type="Variable" Display="always" Required="true" Mask="false">America/New_York</Config>
   <Config Name="Admin name" Target="ADMIN_NAME" Default="BookVault Admin" Description="Initial administrator display name (first run only)" Type="Variable" Display="always" Required="true" Mask="false">BookVault Admin</Config>
   <Config Name="Admin email" Target="ADMIN_EMAIL" Default="admin@bookvault.local" Description="Initial administrator email (first run only)" Type="Variable" Display="always" Required="true" Mask="false">admin@bookvault.local</Config>
-  <Config Name="Admin password" Target="ADMIN_PASSWORD" Default="" Description="Initial administrator password (first run only; use 8+ characters)" Type="Variable" Display="always-hide" Required="true" Mask="true"></Config>
+  <Config Name="Admin password" Target="ADMIN_PASSWORD" Default="" Description="Initial administrator password (first run only; use 12-128 characters)" Type="Variable" Display="always-hide" Required="true" Mask="true"></Config>
 </Container>

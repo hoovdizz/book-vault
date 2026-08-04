@@ -12,8 +12,8 @@ BookVault is a self-hosted personal book-library interface packaged as one light
 | `/config` | required | Persistent SQLite database location |
 | `TZ` | `America/New_York` | Container timezone |
 | `ADMIN_NAME` | `BookVault Admin` | Initial admin name, used only with a new database |
-| `ADMIN_EMAIL` | `admin@bookvault.local` | Initial admin login, used only with a new database |
-| `ADMIN_PASSWORD` | `changeme` | Initial admin password; always override this |
+| `ADMIN_EMAIL` | required | Initial admin login, used only with a new database |
+| `ADMIN_PASSWORD` | required | Initial 12–128 character admin password |
 | `SESSION_DAYS` | `30` | Login session lifetime |
 | `DATABASE_PATH` | `/config/book-vault.sqlite` | Embedded database file |
 
@@ -36,7 +36,7 @@ The database uses SQLite WAL mode, similar to the embedded-database approach use
 
 4. Map container path `/config` to `/mnt/user/appdata/book-vault`.
 5. Map container port `3000` to an available host port, normally `3000`.
-6. Set a unique `ADMIN_PASSWORD` of at least eight characters and confirm the admin email.
+6. Set a unique `ADMIN_PASSWORD` of at least twelve characters and confirm the admin email. A new installation refuses to start without both settings.
 7. Apply the template, then open `http://UNRAID-IP:3000`.
 
 The admin environment variables create the first account only when the database is empty. Changing them later does not change an existing account.
@@ -82,7 +82,7 @@ The GitHub Actions workflow publishes `main` as `latest` and `development` as `d
 
 ## Add users
 
-Sign in as an administrator, open **Profile**, and use the **Users** form. New accounts may be regular users or administrators. Passwords are salted and hashed with scrypt before they are stored; bearer session tokens expire after `SESSION_DAYS`.
+Sign in as an administrator, open **Profile**, and use the **Users** form. New accounts may be regular users or administrators. Passwords are salted and hashed asynchronously with scrypt. Sessions use hashed server-side tokens and `HttpOnly`, `SameSite=Strict` cookies that expire after `SESSION_DAYS`.
 
 ## Local development
 
@@ -100,13 +100,29 @@ npm run build
 npm start
 ```
 
-By default this creates `data/book-vault.sqlite` and listens on `http://localhost:3000`. The initial local login is `admin@bookvault.local` / `changeme`; set `ADMIN_PASSWORD` before using the app outside local development.
+By default this creates `data/book-vault.sqlite` and listens on `http://localhost:3000`. A new database requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables.
+
+PowerShell example:
+
+```powershell
+$env:ADMIN_EMAIL = "admin@example.com"
+$env:ADMIN_PASSWORD = "replace-with-a-long-password"
+npm start
+```
 
 Docker Compose defaults are in [`docker-compose.yml`](docker-compose.yml):
 
 ```sh
 docker compose up -d --build
 ```
+
+Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in the shell or a local `.env` file before running Compose. Files ending in `.local` are ignored by Git; never commit credentials.
+
+## Security
+
+Login attempts are rate-limited, request and credential sizes are bounded, security headers and a Content Security Policy are enabled, and the service runs as a non-root container user. The publish workflow pins third-party actions to commit SHAs, audits dependencies, blocks images with fixable high/critical Trivy findings, and attaches SBOM/provenance attestations. Put BookVault behind an HTTPS reverse proxy before exposing it outside a trusted network.
+
+Upgrading from the original authentication implementation invalidates existing login sessions; user accounts remain intact.
 
 ## Health check
 

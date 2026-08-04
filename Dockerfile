@@ -1,11 +1,11 @@
-FROM node:22-alpine AS build
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM node:22-alpine
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
 LABEL org.opencontainers.image.title="BookVault" \
       org.opencontainers.image.description="Self-hosted personal book library" \
       org.opencontainers.image.source="https://github.com/hoovdizz/book-vault"

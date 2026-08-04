@@ -1,6 +1,6 @@
-import { NavLink, useLocation } from 'react-router-dom';
 import { BookOpen, Library, ListTodo, Heart, Layers, BarChart3, User, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Link, usePathname } from '@/lib/router';
 
 const navItems = [
   { to: '/', icon: BarChart3, label: 'Dashboard' },
@@ -11,7 +11,7 @@ const navItems = [
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const location = useLocation();
+  const pathname = usePathname();
 
   return (
     <div className="flex min-h-screen">
@@ -35,30 +35,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         <nav className="flex-1 px-3 space-y-1">
           {navItems.map(({ to, icon: Icon, label }) => (
-            <NavLink
+            <Link
               key={to}
-              to={to}
+              href={to}
               className={cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors',
-                location.pathname === to
+                pathname === to
                   ? 'bg-sidebar-accent text-sidebar-primary'
                   : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
               )}
             >
               <Icon className="h-4.5 w-4.5" />
               {label}
-            </NavLink>
+            </Link>
           ))}
         </nav>
 
         <div className="px-3 py-4 border-t border-sidebar-border">
-          <NavLink
-            to="/profile"
+          <Link
+            href="/profile"
             className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
           >
             <User className="h-4.5 w-4.5" />
             Profile
-          </NavLink>
+          </Link>
         </div>
       </aside>
 
@@ -72,19 +72,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
         <nav className="flex px-2 pb-2 gap-1 overflow-x-auto">
           {navItems.map(({ to, icon: Icon, label }) => (
-            <NavLink
+            <Link
               key={to}
-              to={to}
+              href={to}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors',
-                location.pathname === to
+                pathname === to
                   ? 'bg-sidebar-accent text-sidebar-primary'
                   : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50'
               )}
             >
               <Icon className="h-3.5 w-3.5" />
               {label}
-            </NavLink>
+            </Link>
           ))}
         </nav>
       </div>
