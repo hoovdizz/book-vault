@@ -17,7 +17,11 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=build /app/dist ./dist
 COPY server ./server
-RUN mkdir -p /config && chown -R node:node /app /config
+# npm is required only in the build stage. The runtime uses Node built-ins, so
+# remove npm/npx and their dependency tree from the published attack surface.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+    && mkdir -p /config \
+    && chown -R node:node /app /config
 USER node
 EXPOSE 3000
 VOLUME ["/config"]
