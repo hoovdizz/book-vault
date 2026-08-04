@@ -4,7 +4,7 @@ import { extname, join, normalize, relative, isAbsolute } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { db, ensureAdmin, hashPassword, MAX_PASSWORD_BYTES, passwordError, publicUser, verifyPassword } from "./database.mjs";
 
-const port = Number(process.env.PORT || 3000);
+const port = Number(process.env.PORT || 8130);
 const host = process.env.HOST || "0.0.0.0";
 const publicDir = normalize(join(import.meta.dirname, "..", "dist"));
 const sessionDays = Math.min(90, Math.max(1, Number(process.env.SESSION_DAYS || 30)));

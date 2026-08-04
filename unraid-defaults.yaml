@@ -2,10 +2,10 @@ name: BookVault
 repository: ghcr.io/hoovdizz/book-vault
 tag: development
 network: bridge
-web_ui: http://[IP]:[PORT:3000]
+web_ui: http://[IP]:[PORT:8130]
 ports:
-  - container: 3000
-    host: 3000
+  - container: 8130
+    host: 8130
     protocol: tcp
 paths:
   - container: /config

@@ -8,7 +8,7 @@ BookVault is a self-hosted personal book-library interface packaged as one light
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| Container port | `3000` | Web interface and API |
+| Container port | `8130` | Web interface and API |
 | `/config` | required | Persistent SQLite database location |
 | `TZ` | `America/New_York` | Container timezone |
 | `ADMIN_NAME` | `BookVault Admin` | Initial admin name, used only with a new database |
@@ -38,9 +38,9 @@ Then:
 2. Open the **Template** dropdown at the top and select **BookVault**. Refresh the page if it does not appear immediately.
 3. Use repository `ghcr.io/hoovdizz/book-vault:development`.
 4. Map `/config` to `/mnt/user/appdata/book-vault`.
-5. Map container port `3000` to an available host port, normally `3000`.
+5. Map container port `8130` to an available host port, normally `8130`.
 6. Enter a valid admin email and a unique admin password of 12–128 characters. A new installation refuses to start without both settings.
-7. Select **Apply**, then open `http://UNRAID-IP:3000`.
+7. Select **Apply**, then open `http://UNRAID-IP:8130`.
 
 To remove the locally installed template later:
 
@@ -57,13 +57,13 @@ If you prefer not to install the XML template, select **Docker → Add Container
 | Name | `BookVault` |
 | Repository | `ghcr.io/hoovdizz/book-vault:development` |
 | Network Type | `Bridge` |
-| WebUI | `http://[IP]:[PORT:3000]` |
+| WebUI | `http://[IP]:[PORT:8130]` |
 
 Use **Add another Path, Port, Variable, Label or Device** to add:
 
 | Type | Name | Container target | Host/default value |
 | --- | --- | --- | --- |
-| Port | Web UI | `3000` | `3000` |
+| Port | Web UI | `8130` | `8130` |
 | Path | Appdata | `/config` | `/mnt/user/appdata/book-vault` |
 | Variable | Timezone | `TZ` | `America/New_York` |
 | Variable | Admin name | `ADMIN_NAME` | `BookVault Admin` |
@@ -73,6 +73,35 @@ Use **Add another Path, Port, Variable, Label or Device** to add:
 The admin environment variables create the first account only when the database is empty. Changing them later does not change an existing account.
 
 The requested human-readable defaults are in [`unraid-defaults.yaml`](unraid-defaults.yaml). Unraid itself imports XML templates, so [`unraid/book-vault.xml`](unraid/book-vault.xml) is the installable equivalent.
+
+### Upgrade an existing development container
+
+Pull the newest image and refresh the locally saved template:
+
+```sh
+docker pull ghcr.io/hoovdizz/book-vault:development
+curl --fail --location \
+  https://raw.githubusercontent.com/hoovdizz/book-vault/development/unraid/book-vault.xml \
+  --output /boot/config/plugins/dockerMan/templates-user/my-book-vault.xml
+```
+
+In **Docker**, edit BookVault and change both the container and host web port to `8130`, then select **Apply**. Do not add a `--user` override: the entrypoint starts briefly as root to repair ownership of the dedicated `/config` mount and drops to the unprivileged `node` user before BookVault starts.
+
+### Database permission error
+
+Versions before the ownership-fix entrypoint can stop with:
+
+```text
+Error: unable to open database file
+```
+
+Update the image and recreate the container using the steps above. The new entrypoint automatically makes the `/config` appdata directory writable without running the application itself as root. If the error remains, confirm that the mapping is exactly:
+
+```text
+/mnt/user/appdata/book-vault  ->  /config
+```
+
+and that `/mnt/user/appdata/book-vault` is on writable storage rather than a read-only remote share.
 
 ### GHCR package access
 
@@ -109,7 +138,7 @@ docker pull ghcr.io/hoovdizz/book-vault:development
 docker run -d \
   --name book-vault \
   --restart unless-stopped \
-  -p 3000:3000 \
+  -p 8130:8130 \
   -v /mnt/user/appdata/book-vault:/config \
   -e TZ=America/New_York \
   -e ADMIN_EMAIL=admin@example.com \
@@ -157,7 +186,7 @@ npm run build
 npm start
 ```
 
-By default this creates `data/book-vault.sqlite` and listens on `http://localhost:3000`. A new database requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables.
+By default this creates `data/book-vault.sqlite` and listens on `http://localhost:8130`. A new database requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables.
 
 PowerShell example:
 
