@@ -1,20 +1,48 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Heart, Plus, ArrowRight } from 'lucide-react';
-import { mockUserBooks } from '@/data/mockData';
+import { Heart, Plus, ArrowRight, Loader2 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import BookCard from '@/components/BookCard';
+import AddBookDialog from '@/components/AddBookDialog';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { api } from '@/lib/auth';
+import { UserBook } from '@/types/book';
 
 export default function Wishlist() {
-  const [wishlistBooks, setWishlistBooks] = useState(
-    mockUserBooks.filter(ub => ub.status === 'wishlist')
+  const queryClient = useQueryClient();
+  const [showAddBook, setShowAddBook] = useState(false);
+  const [movingBookId, setMovingBookId] = useState<string | null>(null);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['books'],
+    queryFn: () => api<{ books: UserBook[] }>('/api/books'),
+  });
+  const books = useMemo(() => data?.books || [], [data?.books]);
+  const wishlistBooks = books.filter(book => book.status === 'wishlist');
+  const collections = useMemo(
+    () => [...new Set(books.map(item => item.book.collection).filter((value): value is string => Boolean(value)))].sort(),
+    [books],
+  );
+  const seriesNames = useMemo(
+    () => [...new Set(books.map(item => item.book.series).filter((value): value is string => Boolean(value)))].sort(),
+    [books],
   );
 
-  const handleMoveToCollection = (id: string) => {
-    setWishlistBooks(prev => prev.filter(ub => ub.id !== id));
-    toast.success('Book moved to your collection!');
-  };
+  async function handleMoveToCollection(book: UserBook) {
+    setMovingBookId(book.id);
+    try {
+      await api(`/api/books/${book.id}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'owned' }),
+      });
+      await queryClient.invalidateQueries({ queryKey: ['books'] });
+      toast.success(`Moved “${book.book.title}” to your collection`);
+    } catch (moveError) {
+      toast.error(moveError instanceof Error ? moveError.message : 'Could not move book');
+    } finally {
+      setMovingBookId(null);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -26,14 +54,20 @@ export default function Wishlist() {
         <Button
           type="button"
           className="gradient-warm text-primary-foreground gap-2 w-fit"
-          onClick={() => toast.info('Add to Wishlist dialog coming soon — connect Lovable Cloud for full functionality.')}
+          onClick={() => setShowAddBook(true)}
         >
           <Plus className="h-4 w-4" />
           Add to Wishlist
         </Button>
       </div>
 
-      {wishlistBooks.length > 0 ? (
+      {isLoading ? (
+        <div className="py-16 text-center text-muted-foreground">Loading your wishlist…</div>
+      ) : error ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-6 text-center text-destructive">
+          {error instanceof Error ? error.message : 'Could not load your wishlist'}
+        </div>
+      ) : wishlistBooks.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {wishlistBooks.map((ub, i) => (
             <motion.div
@@ -50,9 +84,12 @@ export default function Wishlist() {
                   variant="outline"
                   size="sm"
                   className="w-full text-xs gap-1 border-border text-foreground hover:bg-accent hover:text-accent-foreground"
-                  onClick={() => handleMoveToCollection(ub.id)}
+                  disabled={movingBookId === ub.id}
+                  onClick={() => handleMoveToCollection(ub)}
                 >
-                  <ArrowRight className="h-3 w-3" />
+                  {movingBookId === ub.id
+                    ? <Loader2 className="h-3 w-3 animate-spin" />
+                    : <ArrowRight className="h-3 w-3" />}
                   Move to Collection
                 </Button>
               </div>
@@ -66,6 +103,14 @@ export default function Wishlist() {
           <p className="text-sm mt-1">Search for books to add to your wishlist</p>
         </div>
       )}
+
+      <AddBookDialog
+        open={showAddBook}
+        onOpenChange={setShowAddBook}
+        collections={collections}
+        seriesNames={seriesNames}
+        destination="wishlist"
+      />
     </div>
   );
 }

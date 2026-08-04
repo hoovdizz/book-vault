@@ -74,6 +74,63 @@ describe("books API", () => {
     });
   });
 
+  it("persists wishlist additions and moves them into the collection", async () => {
+    const createResponse = await fetch(`${baseUrl}/api/books`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        title: "Wishlist Integration Book",
+        author: "BookVault",
+        status: "wishlist",
+        formats: ["physical"],
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json();
+    expect(created.book.status).toBe("wishlist");
+
+    const createOtherUserResponse = await fetch(`${baseUrl}/api/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        name: "Wishlist Reader",
+        email: "wishlist-reader@bookvault.local",
+        password: "wishlistpassword",
+        role: "user",
+      }),
+    });
+    expect(createOtherUserResponse.status).toBe(201);
+    const otherLoginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "wishlist-reader@bookvault.local",
+        password: "wishlistpassword",
+      }),
+    });
+    expect(otherLoginResponse.status).toBe(200);
+    const otherCookie = otherLoginResponse.headers.get("set-cookie").split(";")[0];
+    const crossUserMoveResponse = await fetch(`${baseUrl}/api/books/${created.book.id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: otherCookie },
+      body: JSON.stringify({ status: "owned" }),
+    });
+    expect(crossUserMoveResponse.status).toBe(404);
+
+    const moveResponse = await fetch(`${baseUrl}/api/books/${created.book.id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ status: "owned" }),
+    });
+    expect(moveResponse.status).toBe(200);
+    const moved = await moveResponse.json();
+    expect(moved.book).toMatchObject({
+      id: created.book.id,
+      status: "owned",
+      book: { title: "Wishlist Integration Book" },
+    });
+  });
+
   it("keeps persisted collections isolated between users", async () => {
     const createUserResponse = await fetch(`${baseUrl}/api/users`, {
       method: "POST",

@@ -300,6 +300,24 @@ async function api(req, res, url) {
     audit("book_created", req, { userId: user.id, bookId: Number(result.lastInsertRowid), source: book.source });
     return send(res, 201, { book: publicBook(created) });
   }
+  const bookStatusMatch = url.pathname.match(/^\/api\/books\/([1-9]\d*)\/status$/);
+  if (req.method === "PATCH" && bookStatusMatch) {
+    const bookId = Number(bookStatusMatch[1]);
+    if (!Number.isSafeInteger(bookId)) return send(res, 400, { error: "Invalid book ID" });
+    const { status } = await jsonBody(req);
+    if (!["owned", "wishlist", "backlog"].includes(status)) {
+      return send(res, 400, { error: "Invalid book status" });
+    }
+    const result = db.prepare(`
+      UPDATE books
+      SET status = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND user_id = ?
+    `).run(status, bookId, user.id);
+    if (!result.changes) return send(res, 404, { error: "Book not found" });
+    const updated = db.prepare("SELECT * FROM books WHERE id = ? AND user_id = ?").get(bookId, user.id);
+    audit("book_status_updated", req, { userId: user.id, bookId, status });
+    return send(res, 200, { book: publicBook(updated) });
+  }
   if (url.pathname === "/api/users") {
     if (user.role !== "admin") return send(res, 403, { error: "Administrator access required" });
     if (req.method === "GET") return send(res, 200, { users: db.prepare("SELECT * FROM users ORDER BY name").all().map(publicUser) });

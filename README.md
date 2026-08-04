@@ -82,7 +82,7 @@ The admin environment variables create the first account only when the database 
 
 ### Add books
 
-Open **Collection → Add Book** and search with a title, ISBN-10, or ISBN-13. BookVault queries Google Books and Open Library from the server, prioritizes Google metadata, uses Open Library when Google is unavailable, and combines available edition covers. Select a result, choose a cover, then record its collection, series, series position, and owned formats before saving.
+Open **Collection → Add Book** or **Wishlist → Add to Wishlist** and search with a title, ISBN-10, or ISBN-13. Both buttons use the same Google Books/Open Library search, metadata, and cover-selection flow; the Wishlist button automatically saves the book with a wishlist status. Select a result, choose a cover, then optionally record its collection, series, series position, and format before saving. Use **Move to Collection** on a wishlist title after purchasing it; the change is persisted in SQLite.
 
 An API key is not required, but Google may apply lower anonymous quotas. Add a restricted Google Books API key to `GOOGLE_BOOKS_API_KEY` in the Unraid template if Google searches regularly fall back to Open Library. The container requires outbound HTTPS access to:
 
@@ -99,6 +99,7 @@ Authenticated book endpoints:
 - `GET /api/book-search?q=...&type=auto|title|isbn` searches the metadata providers.
 - `GET /api/books?q=...` lists the signed-in user's books and optionally searches title, author, ISBN, collection, or series.
 - `POST /api/books` validates and stores a book for the signed-in user.
+- `PATCH /api/books/:id/status` moves one of the signed-in user's books between the collection, wishlist, and backlog.
 
 The requested human-readable defaults are in [`unraid-defaults.yaml`](unraid-defaults.yaml). Unraid does not read that YAML file; it imports [`unraid/book-vault.xml`](unraid/book-vault.xml). Unraid also saves a separate local copy for every created container and rewrites that copy when the container is edited.
 

@@ -117,13 +117,16 @@ export default function AddBookDialog({
   onOpenChange,
   collections,
   seriesNames,
+  destination = 'owned',
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   collections: string[];
   seriesNames: string[];
+  destination?: 'owned' | 'wishlist';
 }) {
   const queryClient = useQueryClient();
+  const isWishlist = destination === 'wishlist';
   const [step, setStep] = useState<'search' | 'details'>('search');
   const [query, setQuery] = useState('');
   const [searchType, setSearchType] = useState<SearchType>('auto');
@@ -239,12 +242,13 @@ export default function AddBookDialog({
         method: 'POST',
         body: JSON.stringify({
           ...draft,
+          status: destination,
           publishedYear: draft.publishedYear || null,
           pageCount: draft.pageCount || null,
         }),
       });
       await queryClient.invalidateQueries({ queryKey: ['books'] });
-      toast.success(`Added “${draft.title}” to your collection`);
+      toast.success(`Added “${draft.title}” to your ${isWishlist ? 'wishlist' : 'collection'}`);
       handleOpenChange(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not add book');
@@ -257,11 +261,17 @@ export default function AddBookDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{step === 'search' ? 'Find a book' : 'Add book details'}</DialogTitle>
+          <DialogTitle>
+            {step === 'search'
+              ? `Find a book${isWishlist ? ' for your wishlist' : ''}`
+              : `Add book to ${isWishlist ? 'wishlist' : 'collection'}`}
+          </DialogTitle>
           <DialogDescription>
             {step === 'search'
               ? 'Search Google Books by title or ISBN. Open Library is used for fallback results and additional covers.'
-              : 'Choose a cover and record where this title belongs in your library.'}
+              : isWishlist
+                ? 'Choose a cover and optionally record its collection or series before saving it to your wishlist.'
+                : 'Choose a cover and record where this title belongs in your library.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -453,7 +463,7 @@ export default function AddBookDialog({
               <Button type="button" variant="outline" onClick={() => setStep('search')}>Back to search</Button>
               <Button type="submit" disabled={saving}>
                 {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Add to collection
+                Add to {isWishlist ? 'wishlist' : 'collection'}
               </Button>
             </DialogFooter>
           </form>
