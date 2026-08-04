@@ -21,34 +21,91 @@ The database uses SQLite WAL mode, similar to the embedded-database approach use
 
 ## Install on Unraid
 
-### Template installation
+### Install the Unraid template
 
-1. Open **Docker** in the Unraid web interface and select **Add Container**.
-2. Switch to advanced view and use this template URL:
+Unraid's **Add Container** advanced view does not have a field for a remote template URL. Install the XML file from the Unraid terminal instead:
 
-   `https://raw.githubusercontent.com/hoovdizz/book-vault/development/unraid/book-vault.xml`
+```sh
+mkdir -p /boot/config/plugins/dockerMan/templates-user
+curl --fail --location \
+  https://raw.githubusercontent.com/hoovdizz/book-vault/development/unraid/book-vault.xml \
+  --output /boot/config/plugins/dockerMan/templates-user/my-book-vault.xml
+```
 
-   If your Unraid version does not accept a remote template URL, copy the fields from [`unraid/book-vault.xml`](unraid/book-vault.xml) into **Add Container**.
-3. Set the repository to one of:
+Then:
 
-   - Stable/main: `ghcr.io/hoovdizz/book-vault:latest`
-   - Development: `ghcr.io/hoovdizz/book-vault:development`
-
-4. Map container path `/config` to `/mnt/user/appdata/book-vault`.
+1. Open the **Docker** tab and select **Add Container**.
+2. Open the **Template** dropdown at the top and select **BookVault**. Refresh the page if it does not appear immediately.
+3. Use repository `ghcr.io/hoovdizz/book-vault:development`.
+4. Map `/config` to `/mnt/user/appdata/book-vault`.
 5. Map container port `3000` to an available host port, normally `3000`.
-6. Set a unique `ADMIN_PASSWORD` of at least twelve characters and confirm the admin email. A new installation refuses to start without both settings.
-7. Apply the template, then open `http://UNRAID-IP:3000`.
+6. Enter a valid admin email and a unique admin password of 12–128 characters. A new installation refuses to start without both settings.
+7. Select **Apply**, then open `http://UNRAID-IP:3000`.
+
+To remove the locally installed template later:
+
+```sh
+rm /boot/config/plugins/dockerMan/templates-user/my-book-vault.xml
+```
+
+### Add the container manually
+
+If you prefer not to install the XML template, select **Docker → Add Container** and enter:
+
+| Unraid field | Value |
+| --- | --- |
+| Name | `BookVault` |
+| Repository | `ghcr.io/hoovdizz/book-vault:development` |
+| Network Type | `Bridge` |
+| WebUI | `http://[IP]:[PORT:3000]` |
+
+Use **Add another Path, Port, Variable, Label or Device** to add:
+
+| Type | Name | Container target | Host/default value |
+| --- | --- | --- | --- |
+| Port | Web UI | `3000` | `3000` |
+| Path | Appdata | `/config` | `/mnt/user/appdata/book-vault` |
+| Variable | Timezone | `TZ` | `America/New_York` |
+| Variable | Admin name | `ADMIN_NAME` | `BookVault Admin` |
+| Variable | Admin email | `ADMIN_EMAIL` | Your email address |
+| Variable | Admin password | `ADMIN_PASSWORD` | A unique 12–128 character password |
 
 The admin environment variables create the first account only when the database is empty. Changing them later does not change an existing account.
 
 The requested human-readable defaults are in [`unraid-defaults.yaml`](unraid-defaults.yaml). Unraid itself imports XML templates, so [`unraid/book-vault.xml`](unraid/book-vault.xml) is the installable equivalent.
 
-### Unraid terminal
+### GHCR package access
 
-Pull and run the stable image:
+The image must be public for an anonymous Unraid pull. If Docker reports `unauthorized`, the package owner must perform this one-time GitHub setting:
+
+1. Open [BookVault package settings](https://github.com/users/hoovdizz/packages/container/book-vault/settings).
+2. Find **Danger Zone → Change package visibility**.
+3. Select **Public** and confirm `book-vault`.
+4. On Unraid, clear any stale registry session and pull again:
+
+   ```sh
+   docker logout ghcr.io 2>/dev/null || true
+   docker pull ghcr.io/hoovdizz/book-vault:development
+   ```
+
+If the package must remain private, create a GitHub classic personal access token with `read:packages`, then authenticate from the Unraid terminal:
 
 ```sh
-docker pull ghcr.io/hoovdizz/book-vault:latest
+export GHCR_USER='your-github-username'
+read -rsp 'GitHub package token: ' GHCR_TOKEN
+printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+unset GHCR_TOKEN
+docker pull ghcr.io/hoovdizz/book-vault:development
+```
+
+Do not put a GitHub token directly in the command line, XML template, or container variables.
+
+### Run from the Unraid terminal
+
+Development is currently the published install target:
+
+```sh
+docker pull ghcr.io/hoovdizz/book-vault:development
 docker run -d \
   --name book-vault \
   --restart unless-stopped \
@@ -57,10 +114,10 @@ docker run -d \
   -e TZ=America/New_York \
   -e ADMIN_EMAIL=admin@example.com \
   -e ADMIN_PASSWORD='replace-with-a-long-password' \
-  ghcr.io/hoovdizz/book-vault:latest
+  ghcr.io/hoovdizz/book-vault:development
 ```
 
-To follow development instead, replace both occurrences of `:latest` with `:development`.
+Use `:latest` only after the container changes have been merged into `main` and the `latest` image has been published.
 
 ## Pull main or development
 
