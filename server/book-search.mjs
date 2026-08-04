@@ -1,9 +1,11 @@
 const googleBooksEndpoint = "https://www.googleapis.com/books/v1/volumes";
 const openLibraryEndpoint = "https://openlibrary.org/search.json";
+const hardcoverEndpoint = "https://api.hardcover.app/v1/graphql";
 const coverHosts = new Set([
   "books.google.com",
   "books.googleusercontent.com",
   "covers.openlibrary.org",
+  "assets.hardcover.app",
 ]);
 const googleCoverSizes = ["extraLarge", "large", "medium", "small", "thumbnail", "smallThumbnail"];
 
@@ -66,6 +68,59 @@ function uniqueCovers(covers) {
     seen.add(cover.url);
     return true;
   }).slice(0, 12);
+}
+
+function hardcoverAuthorization(token) {
+  const value = cleanText(token, 4000);
+  return value && (/^Bearer\s/i.test(value) ? value : `Bearer ${value}`);
+}
+
+function hardcoverContributors(value) {
+  return (Array.isArray(value) ? value : [])
+    .map(contribution => cleanText(contribution?.author?.name || contribution?.name, 300))
+    .filter(Boolean);
+}
+
+function hardcoverCoverOptions(book) {
+  const values = [
+    typeof book?.cached_image === "string" ? book.cached_image : book?.cached_image?.url,
+    ...(Array.isArray(book?.images) ? book.images.map(image => image?.url) : []),
+  ];
+  return uniqueCovers(values.map((url, index) =>
+    coverOption(url, "Hardcover", index ? `Hardcover cover ${index + 1}` : "Hardcover cover")
+  ));
+}
+
+export function normalizeHardcoverBooks(payload) {
+  const editionsByBook = new Map();
+  for (const edition of payload?.data?.editions || []) {
+    if (!editionsByBook.has(edition?.book_id)) editionsByBook.set(edition?.book_id, edition);
+  }
+  return (payload?.data?.books || []).flatMap(book => {
+    const title = cleanText(book?.title, 300);
+    if (!title) return [];
+    const edition = editionsByBook.get(book.id) || {};
+    const identifiers = [edition.isbn_13, edition.isbn_10].map(normalizeIsbn).filter(Boolean);
+    const contributors = hardcoverContributors(book.cached_contributors);
+    const coverOptions = hardcoverCoverOptions(book);
+    return [{
+      source: "manual",
+      sourceLabel: "Hardcover",
+      sourceId: cleanText(book.id, 100),
+      isbn: identifiers.find(value => value.length === 13) || identifiers[0],
+      identifiers,
+      title,
+      author: contributors.join(", ") || "Unknown author",
+      publishedYear: year(book.release_year || book.release_date),
+      pageCount: Number.isInteger(book.pages) && book.pages > 0 ? book.pages : undefined,
+      genre: cleanText(first(book?.cached_tags?.Genre)?.tag || first(book?.cached_tags?.Genre), 150) || undefined,
+      description: cleanText(book.description, 5000) || undefined,
+      series: cleanText(book.series, 150) || undefined,
+      seriesNumber: book.seriesNumber == null ? undefined : cleanText(book.seriesNumber, 30),
+      coverUrl: coverOptions[0]?.url,
+      coverOptions,
+    }];
+  });
 }
 
 function googleCoverOptions(imageLinks = {}) {
@@ -180,12 +235,16 @@ function mergeResult(primary, secondary) {
   };
 }
 
-export function mergeBookResults(googleResults, openLibraryResults) {
+export function mergeBookResults(googleResults, openLibraryResults, hardcoverResults = []) {
   const merged = [];
   for (const candidate of [...googleResults, ...openLibraryResults]) {
     const index = merged.findIndex(existing => sameBook(existing, candidate));
     if (index === -1) merged.push(candidate);
     else merged[index] = mergeResult(merged[index], candidate);
+  }
+  for (const candidate of hardcoverResults) {
+    const index = merged.findIndex(existing => sameBook(existing, candidate));
+    if (index !== -1) merged[index] = mergeResult(merged[index], candidate);
   }
   return merged.slice(0, 12).map(result => ({
     ...result,
@@ -193,12 +252,15 @@ export function mergeBookResults(googleResults, openLibraryResults) {
   }));
 }
 
-async function fetchJson(url, provider, timeoutMs) {
+async function fetchJson(url, provider, timeoutMs, options = {}) {
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
       "User-Agent": "BookVault/1.0 (+https://github.com/hoovdizz/book-vault)",
+      ...options.headers,
     },
+    method: options.method || "GET",
+    body: options.body,
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) throw new Error(`${provider} returned HTTP ${response.status}`);
@@ -207,6 +269,205 @@ async function fetchJson(url, provider, timeoutMs) {
   const text = await response.text();
   if (Buffer.byteLength(text, "utf8") > 3_000_000) throw new Error(`${provider} response was too large`);
   return JSON.parse(text);
+}
+
+async function hardcoverGraphql(query, variables, token, timeoutMs) {
+  const authorization = hardcoverAuthorization(token);
+  if (!authorization) throw new Error("Hardcover API token is not configured");
+  const payload = await fetchJson(hardcoverEndpoint, "Hardcover", timeoutMs, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: authorization,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (payload?.errors?.length) throw new Error(`Hardcover: ${cleanText(payload.errors[0]?.message, 300)}`);
+  return payload;
+}
+
+async function lookupHardcoverBooks(query, token, timeoutMs) {
+  const searchPayload = await hardcoverGraphql(`
+    query BookVaultSearch($query: String!) {
+      search(query: $query, query_type: "Book", per_page: 12, page: 1) { ids }
+    }
+  `, { query }, token, timeoutMs);
+  const ids = (searchPayload?.data?.search?.ids || [])
+    .map(Number)
+    .filter(Number.isSafeInteger)
+    .slice(0, 12);
+  if (!ids.length) return [];
+  const booksPayload = await hardcoverGraphql(`
+    query BookVaultCovers($ids: [Int!]!) {
+      books(where: {id: {_in: $ids}}, limit: 12) {
+        id
+        title
+        description
+        release_year
+        pages
+        cached_contributors
+        cached_tags
+        cached_image(path: "url")
+        images(limit: 6) { url }
+      }
+      editions(
+        where: {book_id: {_in: $ids}}
+        distinct_on: book_id
+        order_by: [{book_id: asc}, {score: desc_nulls_last}]
+      ) {
+        book_id
+        isbn_10
+        isbn_13
+      }
+    }
+  `, { ids }, token, timeoutMs);
+  return normalizeHardcoverBooks(booksPayload);
+}
+
+function inferredSeriesPosition(seriesValues, seriesName) {
+  const matching = (Array.isArray(seriesValues) ? seriesValues : [])
+    .find(value => cleanText(value, 200).toLocaleLowerCase().includes(seriesName.toLocaleLowerCase()));
+  const match = cleanText(matching, 200).match(/(?:#|book\s+)?(\d+(?:\.\d+)?)\s*$/i);
+  return match?.[1];
+}
+
+function seriesBaseName(value) {
+  return cleanText(value, 150).replace(/\s*(?:#|book\s+)\d+(?:\.\d+)?\s*$/i, "").trim();
+}
+
+function normalizeOpenLibrarySeries(payload, requestedSeries) {
+  const candidateNames = (payload?.docs || [])
+    .flatMap(document => Array.isArray(document.series) ? document.series : [])
+    .map(seriesBaseName)
+    .filter(Boolean);
+  const exactName = candidateNames.find(value => value.toLocaleLowerCase() === requestedSeries.toLocaleLowerCase());
+  const containingName = candidateNames.find(value =>
+    value.toLocaleLowerCase().includes(requestedSeries.toLocaleLowerCase()));
+  const seriesName = exactName || containingName || requestedSeries;
+  return (payload?.docs || []).flatMap(document =>
+    normalizeOpenLibraryDocs({ docs: [document] }).map(result => ({
+      ...result,
+      series: seriesName,
+      seriesNumber: inferredSeriesPosition(document.series, seriesName),
+      coverUrl: result.coverOptions[0]?.url,
+    }))
+  );
+}
+
+async function lookupOpenLibrarySeries(query, timeoutMs) {
+  const url = new URL(openLibraryEndpoint);
+  const escaped = query.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  url.searchParams.set("q", `series:"${escaped}"`);
+  url.searchParams.set("limit", "50");
+  url.searchParams.set(
+    "fields",
+    "key,title,author_name,isbn,first_publish_year,publisher,number_of_pages_median,cover_i,editions,series,subject,first_sentence",
+  );
+  const payload = await fetchJson(url, "Open Library", timeoutMs);
+  const books = normalizeOpenLibrarySeries(payload, query);
+  return {
+    seriesName: books[0]?.series || query,
+    books,
+    provider: "Open Library",
+  };
+}
+
+async function lookupHardcoverSeries(query, token, timeoutMs) {
+  const searchPayload = await hardcoverGraphql(`
+    query BookVaultSeriesSearch($query: String!) {
+      search(query: $query, query_type: "Series", per_page: 5, page: 1) { ids results }
+    }
+  `, { query }, token, timeoutMs);
+  const ids = (searchPayload?.data?.search?.ids || []).map(Number).filter(Number.isSafeInteger);
+  const searchResults = Array.isArray(searchPayload?.data?.search?.results)
+    ? searchPayload.data.search.results
+    : [];
+  const exactIndex = searchResults.findIndex(result =>
+    cleanText(result?.name, 150).toLocaleLowerCase() === query.toLocaleLowerCase());
+  const id = ids[exactIndex >= 0 ? exactIndex : 0];
+  if (!id) return { seriesName: query, books: [], provider: "Hardcover" };
+  const seriesPayload = await hardcoverGraphql(`
+    query BookVaultSeries($id: Int!) {
+      series_by_pk(id: $id) {
+        id
+        name
+        book_series(
+          limit: 100
+          distinct_on: position
+          order_by: [{position: asc}, {book: {users_count: desc}}]
+          where: {
+            book: {canonical_id: {_is_null: true}, is_partial_book: {_eq: false}}
+            compilation: {_eq: false}
+          }
+        ) {
+          position
+          book {
+            id
+            title
+            description
+            release_year
+            pages
+            cached_contributors
+            cached_tags
+            cached_image(path: "url")
+          }
+        }
+      }
+    }
+  `, { id }, token, timeoutMs);
+  const series = seriesPayload?.data?.series_by_pk;
+  const rows = Array.isArray(series?.book_series) ? series.book_series : [];
+  const bookIds = rows.map(row => Number(row?.book?.id)).filter(Number.isSafeInteger);
+  let editions = [];
+  if (bookIds.length) {
+    const editionPayload = await hardcoverGraphql(`
+      query BookVaultSeriesEditions($ids: [Int!]!) {
+        editions(
+          where: {book_id: {_in: $ids}}
+          distinct_on: book_id
+          order_by: [{book_id: asc}, {score: desc_nulls_last}]
+        ) {
+          book_id
+          isbn_10
+          isbn_13
+        }
+      }
+    `, { ids: bookIds }, token, timeoutMs);
+    editions = editionPayload?.data?.editions || [];
+  }
+  const booksPayload = {
+    data: {
+      books: rows.map(row => ({
+        ...row.book,
+        series: cleanText(series?.name, 150) || query,
+        seriesNumber: row.position,
+      })),
+      editions,
+    },
+  };
+  return {
+    seriesName: cleanText(series?.name, 150) || query,
+    books: normalizeHardcoverBooks(booksPayload),
+    provider: "Hardcover",
+  };
+}
+
+export async function lookupSeries(query, options = {}) {
+  const cleanQuery = cleanText(query, 150);
+  if (!cleanQuery) throw Object.assign(new Error("Enter a series name"), { status: 400 });
+  const requestedTimeout = Number(options.timeoutMs);
+  const timeoutMs = Number.isFinite(requestedTimeout)
+    ? Math.min(10_000, Math.max(2_000, requestedTimeout))
+    : 6_000;
+  if (options.hardcoverToken) {
+    try {
+      const hardcover = await lookupHardcoverSeries(cleanQuery, options.hardcoverToken, timeoutMs);
+      if (hardcover.books.length) return hardcover;
+    } catch {
+      // Open Library remains available when the optional Hardcover integration fails.
+    }
+  }
+  return lookupOpenLibrarySeries(cleanQuery, timeoutMs);
 }
 
 export async function lookupBooks(query, searchType = "auto", options = {}) {
@@ -238,9 +499,13 @@ export async function lookupBooks(query, searchType = "auto", options = {}) {
     "key,title,author_name,isbn,first_publish_year,publisher,number_of_pages_median,cover_i,editions,series,subject,first_sentence",
   );
 
-  const [google, openLibrary] = await Promise.allSettled([
+  const hardcoverPromise = options.hardcoverToken
+    ? lookupHardcoverBooks(type === "isbn" ? isbn : cleanQuery, options.hardcoverToken, timeoutMs)
+    : Promise.resolve([]);
+  const [google, openLibrary, hardcover] = await Promise.allSettled([
     fetchJson(googleUrl, "Google Books", timeoutMs),
     fetchJson(openLibraryUrl, "Open Library", timeoutMs),
+    hardcoverPromise,
   ]);
   if (google.status === "rejected" && openLibrary.status === "rejected") {
     const error = new Error("Google Books and Open Library are temporarily unavailable");
@@ -250,11 +515,15 @@ export async function lookupBooks(query, searchType = "auto", options = {}) {
 
   const googleResults = google.status === "fulfilled" ? normalizeGoogleVolumes(google.value) : [];
   const openLibraryResults = openLibrary.status === "fulfilled" ? normalizeOpenLibraryDocs(openLibrary.value, isbn) : [];
+  const hardcoverResults = hardcover.status === "fulfilled" ? hardcover.value : [];
   return {
-    results: mergeBookResults(googleResults, openLibraryResults),
+    results: mergeBookResults(googleResults, openLibraryResults, hardcoverResults),
     providers: {
       googleBooks: google.status === "fulfilled" ? "available" : "unavailable",
       openLibrary: openLibrary.status === "fulfilled" ? "available" : "unavailable",
+      hardcover: options.hardcoverToken
+        ? (hardcover.status === "fulfilled" ? "available" : "unavailable")
+        : "disabled",
     },
   };
 }

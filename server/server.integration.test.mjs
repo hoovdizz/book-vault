@@ -131,6 +131,88 @@ describe("books API", () => {
     });
   });
 
+  it("edits book metadata and reading status", async () => {
+    const createResponse = await fetch(`${baseUrl}/api/books`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        title: "Editable Book",
+        author: "Original Author",
+        formats: ["physical"],
+      }),
+    });
+    const created = await createResponse.json();
+
+    const updateResponse = await fetch(`${baseUrl}/api/books/${created.book.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        title: "Edited Book",
+        author: "Updated Author",
+        collection: "Edited Shelf",
+        series: "Edited Series",
+        seriesNumber: "3",
+        readStatus: "read",
+        status: "owned",
+        formats: ["physical", "ebook"],
+      }),
+    });
+    expect(updateResponse.status).toBe(200);
+    const updated = await updateResponse.json();
+    expect(updated.book).toMatchObject({
+      status: "owned",
+      readStatus: "read",
+      formats: ["physical", "ebook"],
+      book: {
+        title: "Edited Book",
+        author: "Updated Author",
+        collection: "Edited Shelf",
+        series: "Edited Series",
+        seriesNumber: "3",
+      },
+    });
+  });
+
+  it("bulk imports series choices and skips duplicates", async () => {
+    const books = [
+      {
+        title: "Bulk Series One",
+        author: "Series Author",
+        series: "Bulk Series",
+        seriesNumber: "1",
+        status: "owned",
+        formats: ["physical"],
+      },
+      {
+        title: "Bulk Series Two",
+        author: "Series Author",
+        series: "Bulk Series",
+        seriesNumber: "2",
+        status: "wishlist",
+        formats: ["physical"],
+      },
+    ];
+    const response = await fetch(`${baseUrl}/api/books/bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ books }),
+    });
+    expect(response.status).toBe(201);
+    const payload = await response.json();
+    expect(payload.books.map(book => book.status)).toEqual(["owned", "wishlist"]);
+    expect(payload.skipped).toEqual([]);
+
+    const duplicateResponse = await fetch(`${baseUrl}/api/books/bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ books }),
+    });
+    expect(duplicateResponse.status).toBe(201);
+    const duplicatePayload = await duplicateResponse.json();
+    expect(duplicatePayload.books).toEqual([]);
+    expect(duplicatePayload.skipped).toHaveLength(2);
+  });
+
   it("keeps persisted collections isolated between users", async () => {
     const createUserResponse = await fetch(`${baseUrl}/api/users`, {
       method: "POST",

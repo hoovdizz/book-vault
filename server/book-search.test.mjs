@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isIsbnQuery,
   lookupBooks,
+  lookupSeries,
   mergeBookResults,
   normalizeGoogleVolumes,
+  normalizeHardcoverBooks,
   normalizeIsbn,
   normalizeOpenLibraryDocs,
 } from "./book-search.mjs";
@@ -84,6 +86,35 @@ describe("book search normalization", () => {
     expect(result.coverUrl).toBe(result.coverOptions[0].url);
   });
 
+  it("adds matching Hardcover covers without replacing primary metadata", () => {
+    const google = normalizeGoogleVolumes({
+      items: [{
+        id: "google-volume",
+        volumeInfo: {
+          title: "The Fellowship of the Ring",
+          authors: ["J.R.R. Tolkien"],
+          industryIdentifiers: [{ type: "ISBN_13", identifier: "9780261103573" }],
+          imageLinks: { large: "https://books.google.com/books/content?id=google-volume" },
+        },
+      }],
+    });
+    const hardcover = normalizeHardcoverBooks({
+      data: {
+        books: [{
+          id: 42,
+          title: "The Fellowship of the Ring",
+          cached_contributors: [{ author: { name: "J.R.R. Tolkien" } }],
+          cached_image: "https://assets.hardcover.app/edition/42/cover.jpeg",
+        }],
+        editions: [{ book_id: 42, isbn_13: "9780261103573" }],
+      },
+    });
+    const [result] = mergeBookResults(google, [], hardcover);
+    expect(result.source).toBe("google_books");
+    expect(result.coverOptions).toHaveLength(2);
+    expect(result.coverOptions[1]).toMatchObject({ source: "Hardcover" });
+  });
+
   it("falls back to Open Library when Google Books is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn(async url => {
       if (String(url).includes("googleapis.com")) {
@@ -114,10 +145,35 @@ describe("book search normalization", () => {
     expect(response.providers).toEqual({
       googleBooks: "unavailable",
       openLibrary: "available",
+      hardcover: "disabled",
     });
     expect(response.results[0]).toMatchObject({
       source: "open_library",
       title: "The Fellowship of the Ring",
+    });
+  });
+
+  it("finds a whole series through the Open Library fallback", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () => JSON.stringify({
+        docs: [{
+          key: "/works/OL1W",
+          title: "Series Book One",
+          author_name: ["Reader Author"],
+          isbn: ["9780261103573"],
+          series: ["Reader Series #1"],
+          cover_i: 14627060,
+        }],
+      }),
+    })));
+    const response = await lookupSeries("Reader Series");
+    expect(response.provider).toBe("Open Library");
+    expect(response.books[0]).toMatchObject({
+      title: "Series Book One",
+      seriesNumber: "1",
     });
   });
 });

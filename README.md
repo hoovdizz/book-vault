@@ -2,7 +2,7 @@
 
 BookVault is a self-hosted personal book-library interface packaged as one lightweight container. The web app, API, authentication, and embedded SQLite database all run together; no separate database container is required.
 
-The Collection and Series screens use books stored in SQLite per user. Dashboard, backlog, and wishlist still contain prototype sample data while those workflows are migrated.
+Collection, Series, Dashboard, Backlog, and Wishlist all use books stored in SQLite and isolated per user.
 
 ## Container settings
 
@@ -14,6 +14,7 @@ The Collection and Series screens use books stored in SQLite per user. Dashboard
 | `PUID` | `99` | Runtime user and `/config` owner (`nobody` on Unraid) |
 | `PGID` | `100` | Runtime group and `/config` group (`users` on Unraid) |
 | `GOOGLE_BOOKS_API_KEY` | optional | Server-side Google Books API key; Open Library remains available as fallback |
+| `HARDCOVER_API_TOKEN` | optional | Private server-side Hardcover token for extra cover choices and complete series metadata |
 | `BOOK_LOOKUP_TIMEOUT_MS` | `6000` | Per-provider lookup timeout, bounded to 2–10 seconds |
 | `ADMIN_NAME` | `bookvaultadmin` | Initial admin name, used only with a new database |
 | `ADMIN_EMAIL` | `admin@bookvault.local` in the Unraid template | Initial admin login, used only with a new database |
@@ -73,6 +74,7 @@ Use **Add another Path, Port, Variable, Label or Device** to add:
 | Variable | User ID | `PUID` | `99` (`nobody` on Unraid) |
 | Variable | Group ID | `PGID` | `100` (`users` on Unraid) |
 | Variable | Google Books API key | `GOOGLE_BOOKS_API_KEY` | Optional API key, stored as a masked value |
+| Variable | Hardcover API token | `HARDCOVER_API_TOKEN` | Optional token, stored as a masked value |
 | Variable | Book lookup timeout | `BOOK_LOOKUP_TIMEOUT_MS` | `6000` |
 | Variable | Admin name | `ADMIN_NAME` | `bookvaultadmin` |
 | Variable | Admin email | `ADMIN_EMAIL` | `admin@bookvault.local` |
@@ -82,7 +84,11 @@ The admin environment variables create the first account only when the database 
 
 ### Add books
 
-Open **Collection → Add Book** or **Wishlist → Add to Wishlist** and search with a title, ISBN-10, or ISBN-13. Both buttons use the same Google Books/Open Library search, metadata, and cover-selection flow; the Wishlist button automatically saves the book with a wishlist status. Select a result, choose a cover, then optionally record its collection, series, series position, and format before saving. Use **Move to Collection** on a wishlist title after purchasing it; the change is persisted in SQLite.
+Open **Collection → Add Book** or **Wishlist → Add to Wishlist** and search with a title, ISBN-10, or ISBN-13. Both buttons use the same provider search, metadata, and cover-selection flow; the Wishlist button automatically saves the book with a wishlist status. Select a result, choose a cover, then optionally record its collection, series, series position, and format before saving. Use **Move to Collection** on a wishlist title after purchasing it; the change is persisted in SQLite.
+
+Click any persisted book card to edit its metadata, cover, format, Collection/Wishlist/Backlog location, and **Unread / Currently reading / Read** status. The **More** button in the editor repeats the provider lookup and adds newly found cover editions without discarding the current cover.
+
+Open **Series → Add Book Series**, search by series name, and review the returned volumes. Mark each new title as **Collection**, **Wishlist**, or **Skip**, or use the bulk selection buttons, then import the selected rows together. Existing ISBN/title matches are identified and are not duplicated.
 
 An API key is not required, but Google may apply lower anonymous quotas. Add a restricted Google Books API key to `GOOGLE_BOOKS_API_KEY` in the Unraid template if Google searches regularly fall back to Open Library. The container requires outbound HTTPS access to:
 
@@ -91,14 +97,27 @@ An API key is not required, but Google may apply lower anonymous quotas. Add a r
 - `books.google.com`
 - `books.googleusercontent.com`
 - `covers.openlibrary.org`
+- `api.hardcover.app` and `assets.hardcover.app` when Hardcover is enabled
 
-Book metadata and cover links come from the [Google Books API](https://developers.google.com/books/docs/v1/using) and the [Open Library Search and Covers APIs](https://openlibrary.org/developers/api).
+Book metadata and cover links come from the [Google Books API](https://developers.google.com/books/docs/v1/using), [Open Library Search and Covers APIs](https://openlibrary.org/developers/api), and optionally the [Hardcover GraphQL API](https://docs.hardcover.app/api/getting-started/).
+
+Goodreads is not used as a cover source because it [stopped issuing public developer keys and is retiring its API](https://www.goodreads.com/group/show/8095-goodreads-developers), while its current terms prohibit automated data gathering and copying its images. Hardcover is the supported Goodreads-style catalog replacement. To enable it:
+
+1. Create or sign in to a Hardcover account and copy the token from **Account Settings → Hardcover API**.
+2. Edit the BookVault container in Unraid.
+3. Add `HARDCOVER_API_TOKEN` as a masked variable and paste the complete token. BookVault accepts it with or without the `Bearer ` prefix.
+4. Apply the change to recreate the container. The token stays server-side and is never sent to the browser.
+
+Hardcover tokens expire annually. If Hardcover cover enrichment stops working, replace the token; Google Books and Open Library continue working without it.
 
 Authenticated book endpoints:
 
 - `GET /api/book-search?q=...&type=auto|title|isbn` searches the metadata providers.
+- `GET /api/series-search?q=...` finds the books in a series, using Hardcover when configured and Open Library otherwise.
 - `GET /api/books?q=...` lists the signed-in user's books and optionally searches title, author, ISBN, collection, or series.
 - `POST /api/books` validates and stores a book for the signed-in user.
+- `POST /api/books/bulk` validates and imports up to 100 reviewed series books.
+- `PUT /api/books/:id` updates one of the signed-in user's books and reading status.
 - `PATCH /api/books/:id/status` moves one of the signed-in user's books between the collection, wishlist, and backlog.
 
 The requested human-readable defaults are in [`unraid-defaults.yaml`](unraid-defaults.yaml). Unraid does not read that YAML file; it imports [`unraid/book-vault.xml`](unraid/book-vault.xml). Unraid also saves a separate local copy for every created container and rewrites that copy when the container is edited.

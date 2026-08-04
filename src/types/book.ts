@@ -4,6 +4,8 @@ export interface CoverOption {
   label: string;
 }
 
+export type BookSource = 'google_books' | 'open_library' | 'manual';
+
 export interface Book {
   id: string;
   isbn?: string;
@@ -19,12 +21,12 @@ export interface Book {
   publishedYear?: number;
   publisher?: string;
   description?: string;
-  source?: 'google_books' | 'open_library' | 'manual';
+  source?: BookSource;
   sourceId?: string;
 }
 
 export interface BookSearchResult extends Omit<Book, 'id'> {
-  source: 'google_books' | 'open_library';
+  source: BookSource;
   sourceLabel: string;
   sourceId: string;
   identifiers?: string[];

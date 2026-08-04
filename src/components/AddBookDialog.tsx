@@ -20,7 +20,11 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
 type SearchType = 'auto' | 'title' | 'isbn';
-type Providers = { googleBooks: 'available' | 'unavailable'; openLibrary: 'available' | 'unavailable' };
+type Providers = {
+  googleBooks: 'available' | 'unavailable';
+  openLibrary: 'available' | 'unavailable';
+  hardcover: 'available' | 'unavailable' | 'disabled';
+};
 type SearchResponse = { results: BookSearchResult[]; providers: Providers };
 
 type Draft = {
@@ -145,7 +149,8 @@ export default function AddBookDialog({
     if (providers.openLibrary === 'unavailable' && providers.googleBooks === 'available') {
       return 'Open Library cover enrichment was unavailable; Google Books results are shown.';
     }
-    return 'Google Books results are prioritized and Open Library supplies fallback metadata and cover editions.';
+    const hardcover = providers.hardcover === 'available' ? ' Hardcover supplies additional cover choices.' : '';
+    return `Google Books results are prioritized and Open Library supplies fallback metadata and cover editions.${hardcover}`;
   }, [providers]);
 
   function reset() {
@@ -268,7 +273,7 @@ export default function AddBookDialog({
           </DialogTitle>
           <DialogDescription>
             {step === 'search'
-              ? 'Search Google Books by title or ISBN. Open Library is used for fallback results and additional covers.'
+              ? 'Search Google Books by title or ISBN. Open Library provides fallback results, and optional Hardcover integration adds covers.'
               : isWishlist
                 ? 'Choose a cover and optionally record its collection or series before saving it to your wishlist.'
                 : 'Choose a cover and record where this title belongs in your library.'}

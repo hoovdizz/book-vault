@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 interface BookCardProps {
   userBook: UserBook;
   compact?: boolean;
+  onSelect?: (book: UserBook) => void;
 }
 
 const formatIcons = {
@@ -13,11 +14,23 @@ const formatIcons = {
   audiobook: { icon: Headphones, label: 'Audiobook' },
 } as const;
 
-export default function BookCard({ userBook, compact }: BookCardProps) {
+export default function BookCard({ userBook, compact, onSelect }: BookCardProps) {
   const { book, readStatus, rating, storageLocation, priority, tags, formats } = userBook;
 
   return (
-    <div className="group bg-card rounded-lg border border-border shadow-card hover:shadow-card-hover transition-all duration-300 overflow-hidden">
+    <div
+      className={`group bg-card rounded-lg border border-border shadow-card hover:shadow-card-hover transition-all duration-300 overflow-hidden ${onSelect ? 'cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring' : ''}`}
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-label={onSelect ? `Edit ${book.title}` : undefined}
+      onClick={() => onSelect?.(userBook)}
+      onKeyDown={event => {
+        if (onSelect && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          onSelect(userBook);
+        }
+      }}
+    >
       {/* Cover */}
       <div className="relative aspect-[2/3] overflow-hidden bg-muted">
         {book.coverUrl ? (

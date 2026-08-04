@@ -1,22 +1,32 @@
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { BookOpen, Eye, Star, Heart, ListTodo, DollarSign, Layers, TrendingUp } from 'lucide-react';
-import { mockStats, mockUserBooks } from '@/data/mockData';
+import { BookOpen, Eye, Heart, ListTodo, Library, Layers, TrendingUp, Glasses } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import BookCard from '@/components/BookCard';
-
-const statCards = [
-  { label: 'Total Books', value: mockStats.totalBooks, icon: BookOpen, color: 'text-primary' },
-  { label: 'Books Read', value: mockStats.booksRead, icon: Eye, color: 'text-accent' },
-  { label: 'Avg Rating', value: mockStats.averageRating.toFixed(1), icon: Star, color: 'text-primary' },
-  { label: 'Collection Value', value: `$${mockStats.totalValue.toFixed(2)}`, icon: DollarSign, color: 'text-accent' },
-  { label: 'Wishlist', value: mockStats.wishlistCount, icon: Heart, color: 'text-chart-wishlist' },
-  { label: 'Backlog', value: mockStats.backlogCount, icon: ListTodo, color: 'text-chart-backlog' },
-  { label: 'Series', value: mockStats.seriesCount, icon: Layers, color: 'text-primary' },
-  { label: 'Unread', value: mockStats.booksUnread, icon: TrendingUp, color: 'text-muted-foreground' },
-];
+import EditBookDialog from '@/components/EditBookDialog';
+import { api } from '@/lib/auth';
+import { UserBook } from '@/types/book';
 
 export default function Dashboard() {
-  const recentBooks = mockUserBooks.filter(ub => ub.status === 'owned').slice(0, 4);
-  const currentlyReading = mockUserBooks.filter(ub => ub.readStatus === 'reading');
+  const [editingBook, setEditingBook] = useState<UserBook | null>(null);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['books'],
+    queryFn: () => api<{ books: UserBook[] }>('/api/books'),
+  });
+  const books = useMemo(() => data?.books || [], [data?.books]);
+  const ownedBooks = books.filter(book => book.status === 'owned');
+  const recentBooks = ownedBooks.slice(0, 4);
+  const currentlyReading = books.filter(book => book.readStatus === 'reading');
+  const stats = useMemo(() => [
+    { label: 'Total Books', value: books.length, icon: BookOpen, color: 'text-primary' },
+    { label: 'Books Read', value: books.filter(book => book.readStatus === 'read').length, icon: Eye, color: 'text-accent' },
+    { label: 'Currently Reading', value: currentlyReading.length, icon: Glasses, color: 'text-primary' },
+    { label: 'Collection', value: ownedBooks.length, icon: Library, color: 'text-accent' },
+    { label: 'Wishlist', value: books.filter(book => book.status === 'wishlist').length, icon: Heart, color: 'text-chart-wishlist' },
+    { label: 'Backlog', value: books.filter(book => book.status === 'backlog').length, icon: ListTodo, color: 'text-chart-backlog' },
+    { label: 'Series', value: new Set(books.map(book => book.book.series).filter(Boolean)).size, icon: Layers, color: 'text-primary' },
+    { label: 'Unread', value: books.filter(book => book.readStatus === 'unread').length, icon: TrendingUp, color: 'text-muted-foreground' },
+  ], [books, currentlyReading.length, ownedBooks.length]);
 
   return (
     <div className="space-y-8">
@@ -27,7 +37,7 @@ export default function Dashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {statCards.map((stat, i) => (
+        {stats.map((stat, i) => (
           <motion.div
             key={stat.label}
             initial={{ opacity: 0, y: 12 }}
@@ -44,13 +54,18 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Currently Reading */}
-      {currentlyReading.length > 0 && (
+      {isLoading ? (
+        <div className="py-16 text-center text-muted-foreground">Loading your dashboard…</div>
+      ) : error ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-6 text-center text-destructive">
+          {error instanceof Error ? error.message : 'Could not load your books'}
+        </div>
+      ) : currentlyReading.length > 0 && (
         <section>
           <h2 className="text-xl font-heading font-semibold text-foreground mb-4">Currently Reading</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {currentlyReading.map(ub => (
-              <BookCard key={ub.id} userBook={ub} />
+              <BookCard key={ub.id} userBook={ub} onSelect={setEditingBook} />
             ))}
           </div>
         </section>
@@ -60,11 +75,19 @@ export default function Dashboard() {
       <section>
         <h2 className="text-xl font-heading font-semibold text-foreground mb-4">Recent Additions</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {recentBooks.map(ub => (
-            <BookCard key={ub.id} userBook={ub} />
-          ))}
+          {recentBooks.length ? recentBooks.map(ub => (
+            <BookCard key={ub.id} userBook={ub} onSelect={setEditingBook} />
+          )) : (
+            <p className="col-span-full py-8 text-center text-muted-foreground">Your collection is empty.</p>
+          )}
         </div>
       </section>
+
+      <EditBookDialog
+        book={editingBook}
+        open={Boolean(editingBook)}
+        onOpenChange={open => { if (!open) setEditingBook(null); }}
+      />
     </div>
   );
 }

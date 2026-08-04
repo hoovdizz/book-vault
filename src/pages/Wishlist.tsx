@@ -4,6 +4,7 @@ import { Heart, Plus, ArrowRight, Loader2 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import BookCard from '@/components/BookCard';
 import AddBookDialog from '@/components/AddBookDialog';
+import EditBookDialog from '@/components/EditBookDialog';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { api } from '@/lib/auth';
@@ -13,6 +14,7 @@ export default function Wishlist() {
   const queryClient = useQueryClient();
   const [showAddBook, setShowAddBook] = useState(false);
   const [movingBookId, setMovingBookId] = useState<string | null>(null);
+  const [editingBook, setEditingBook] = useState<UserBook | null>(null);
   const { data, isLoading, error } = useQuery({
     queryKey: ['books'],
     queryFn: () => api<{ books: UserBook[] }>('/api/books'),
@@ -77,7 +79,7 @@ export default function Wishlist() {
               transition={{ delay: i * 0.05 }}
               className="relative"
             >
-              <BookCard userBook={ub} />
+              <BookCard userBook={ub} onSelect={setEditingBook} />
               <div className="mt-2">
                 <Button
                   type="button"
@@ -110,6 +112,11 @@ export default function Wishlist() {
         collections={collections}
         seriesNames={seriesNames}
         destination="wishlist"
+      />
+      <EditBookDialog
+        book={editingBook}
+        open={Boolean(editingBook)}
+        onOpenChange={open => { if (!open) setEditingBook(null); }}
       />
     </div>
   );

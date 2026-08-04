@@ -4,6 +4,7 @@ import { Search, Filter, Grid3X3, List, Plus, Book, Tablet, Headphones } from 'l
 import { useQuery } from '@tanstack/react-query';
 import BookCard from '@/components/BookCard';
 import AddBookDialog from '@/components/AddBookDialog';
+import EditBookDialog from '@/components/EditBookDialog';
 import { Button } from '@/components/ui/button';
 import { BookFormat, UserBook } from '@/types/book';
 import { api } from '@/lib/auth';
@@ -15,6 +16,7 @@ export default function Collection() {
   const [collectionFilter, setCollectionFilter] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [showAddBook, setShowAddBook] = useState(false);
+  const [editingBook, setEditingBook] = useState<UserBook | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['books'],
@@ -164,7 +166,7 @@ export default function Collection() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.04 }}
             >
-              <BookCard userBook={ub} />
+              <BookCard userBook={ub} onSelect={setEditingBook} />
             </motion.div>
           ))}
         </div>
@@ -176,7 +178,17 @@ export default function Collection() {
               initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.03 }}
-              className="flex items-center gap-4 bg-card rounded-lg border border-border p-3 shadow-card hover:shadow-card-hover transition-all"
+              className="flex cursor-pointer items-center gap-4 bg-card rounded-lg border border-border p-3 shadow-card hover:shadow-card-hover transition-all focus:outline-none focus:ring-2 focus:ring-ring"
+              role="button"
+              tabIndex={0}
+              aria-label={`Edit ${ub.book.title}`}
+              onClick={() => setEditingBook(ub)}
+              onKeyDown={event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setEditingBook(ub);
+                }
+              }}
             >
               <div className="w-12 h-16 rounded overflow-hidden bg-muted flex-shrink-0">
                 {ub.book.coverUrl && <img src={ub.book.coverUrl} alt={ub.book.title} className="w-full h-full object-cover" />}
@@ -220,6 +232,11 @@ export default function Collection() {
         onOpenChange={setShowAddBook}
         collections={collections}
         seriesNames={seriesNames}
+      />
+      <EditBookDialog
+        book={editingBook}
+        open={Boolean(editingBook)}
+        onOpenChange={open => { if (!open) setEditingBook(null); }}
       />
     </div>
   );

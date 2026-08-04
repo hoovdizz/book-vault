@@ -1,10 +1,13 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { BookOpen, Layers } from 'lucide-react';
+import { BookOpen, Layers, Plus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/auth';
 import { UserBook } from '@/types/book';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import AddSeriesDialog from '@/components/AddSeriesDialog';
+import EditBookDialog from '@/components/EditBookDialog';
 
 function seriesPosition(book: UserBook) {
   const raw = book.book.seriesNumber;
@@ -14,6 +17,8 @@ function seriesPosition(book: UserBook) {
 }
 
 export default function SeriesPage() {
+  const [showAddSeries, setShowAddSeries] = useState(false);
+  const [editingBook, setEditingBook] = useState<UserBook | null>(null);
   const { data, isLoading, error } = useQuery({
     queryKey: ['books'],
     queryFn: () => api<{ books: UserBook[] }>('/api/books'),
@@ -22,7 +27,7 @@ export default function SeriesPage() {
   const groups = useMemo(() => {
     const bySeries = new Map<string, UserBook[]>();
     for (const item of data?.books || []) {
-      if (item.status !== 'owned' || !item.book.series) continue;
+      if (!['owned', 'wishlist'].includes(item.status) || !item.book.series) continue;
       const books = bySeries.get(item.book.series) || [];
       books.push(item);
       bySeries.set(item.book.series, books);
@@ -38,9 +43,15 @@ export default function SeriesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-heading font-bold text-foreground">Series</h1>
-        <p className="mt-1 text-muted-foreground">Books grouped by the series metadata in your collection</p>
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <div>
+          <h1 className="text-3xl font-heading font-bold text-foreground">Series</h1>
+          <p className="mt-1 text-muted-foreground">Track complete series across your collection and wishlist</p>
+        </div>
+        <Button type="button" className="gradient-warm w-fit gap-2 text-primary-foreground" onClick={() => setShowAddSeries(true)}>
+          <Plus className="h-4 w-4" />
+          Add Book Series
+        </Button>
       </div>
 
       {isLoading ? (
@@ -67,7 +78,7 @@ export default function SeriesPage() {
                   <div>
                     <h2 className="font-heading text-xl font-bold text-foreground">{series.name}</h2>
                     <p className="text-sm text-muted-foreground">
-                      {series.books.length} {series.books.length === 1 ? 'book' : 'books'} in your collection
+                      {series.books.length} tracked {series.books.length === 1 ? 'book' : 'books'}
                     </p>
                   </div>
                 </div>
@@ -75,7 +86,20 @@ export default function SeriesPage() {
 
               <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
                 {series.books.map(item => (
-                  <div key={item.id} className="flex gap-3 rounded-lg border border-border bg-background/50 p-3">
+                  <div
+                    key={item.id}
+                    className="flex cursor-pointer gap-3 rounded-lg border border-border bg-background/50 p-3 focus:outline-none focus:ring-2 focus:ring-ring"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Edit ${item.book.title}`}
+                    onClick={() => setEditingBook(item)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setEditingBook(item);
+                      }
+                    }}
+                  >
                     <div className="h-24 w-16 flex-shrink-0 overflow-hidden rounded bg-muted">
                       {item.book.coverUrl ? (
                         <img
@@ -95,6 +119,9 @@ export default function SeriesPage() {
                       <div className="flex flex-wrap gap-1">
                         {item.book.seriesNumber && <Badge variant="secondary">#{item.book.seriesNumber}</Badge>}
                         {item.book.collection && <Badge variant="outline">{item.book.collection}</Badge>}
+                        <Badge variant={item.status === 'owned' ? 'default' : 'outline'}>
+                          {item.status === 'owned' ? 'Collection' : 'Wishlist'}
+                        </Badge>
                       </div>
                       <h3 className="line-clamp-2 font-heading font-semibold text-foreground">{item.book.title}</h3>
                       <p className="line-clamp-1 text-sm text-muted-foreground">{item.book.author}</p>
@@ -109,9 +136,20 @@ export default function SeriesPage() {
         <div className="rounded-xl border border-dashed border-border py-16 text-center text-muted-foreground">
           <Layers className="mx-auto mb-3 h-9 w-9 opacity-50" />
           <p className="font-heading text-lg">No series yet</p>
-          <p className="mt-1 text-sm">Add a series name when saving a book and it will appear here.</p>
+          <p className="mt-1 text-sm">Use Add Book Series to find and classify every volume at once.</p>
         </div>
       )}
+
+      <AddSeriesDialog
+        open={showAddSeries}
+        onOpenChange={setShowAddSeries}
+        existingBooks={data?.books || []}
+      />
+      <EditBookDialog
+        book={editingBook}
+        open={Boolean(editingBook)}
+        onOpenChange={open => { if (!open) setEditingBook(null); }}
+      />
     </div>
   );
 }

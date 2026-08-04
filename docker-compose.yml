@@ -15,6 +15,7 @@ services:
       PGID: "${PGID:-100}"
       DATABASE_PATH: /config/book-vault.sqlite
       GOOGLE_BOOKS_API_KEY: "${GOOGLE_BOOKS_API_KEY:-}"
+      HARDCOVER_API_TOKEN: "${HARDCOVER_API_TOKEN:-}"
       BOOK_LOOKUP_TIMEOUT_MS: "6000"
       ADMIN_NAME: bookvaultadmin
       ADMIN_EMAIL: "${ADMIN_EMAIL:?Set ADMIN_EMAIL in your environment}"

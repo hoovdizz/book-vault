@@ -3,7 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, relative, isAbsolute, resolve } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { db, ensureAdmin, hashPassword, MAX_PASSWORD_BYTES, passwordError, publicUser, verifyPassword } from "./database.mjs";
-import { isAllowedCoverUrl, lookupBooks, normalizeCoverUrl, normalizeIsbn } from "./book-search.mjs";
+import { isAllowedCoverUrl, lookupBooks, lookupSeries, normalizeCoverUrl, normalizeIsbn } from "./book-search.mjs";
 
 const port = Number(process.env.PORT || 8130);
 const host = process.env.HOST || "0.0.0.0";
@@ -11,6 +11,7 @@ const publicDir = normalize(join(import.meta.dirname, "..", "dist"));
 const sessionDays = Math.min(90, Math.max(1, Number(process.env.SESSION_DAYS || 30)));
 const sessionCookie = "bookvault_session";
 const maxBodyBytes = 16_384;
+const maxBulkBodyBytes = 1024 * 1024;
 const loginWindowMs = 15 * 60 * 1000;
 const loginLimit = 5;
 const loginAttempts = new Map();
@@ -20,7 +21,7 @@ const bookLookupAttempts = new Map();
 const bookLookupCache = new Map();
 const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".png": "image/png" };
 const securityHeaders = {
-  "Content-Security-Policy": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: https://images.unsplash.com https://books.google.com https://books.googleusercontent.com https://covers.openlibrary.org; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'",
+  "Content-Security-Policy": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: https://images.unsplash.com https://books.google.com https://books.googleusercontent.com https://covers.openlibrary.org https://assets.hardcover.app; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'",
   "Referrer-Policy": "no-referrer",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
   "X-Content-Type-Options": "nosniff",
@@ -41,11 +42,11 @@ function send(res, status, body, headers = {}) {
   writeHead(res, status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers });
   res.end(JSON.stringify(body));
 }
-async function jsonBody(req) {
+async function jsonBody(req, limit = maxBodyBytes) {
   let raw = "";
   for await (const chunk of req) {
     raw += chunk;
-    if (Buffer.byteLength(raw, "utf8") > maxBodyBytes) {
+    if (Buffer.byteLength(raw, "utf8") > limit) {
       const error = new Error("Request too large"); error.status = 413; throw error;
     }
   }
@@ -208,6 +209,23 @@ function validatedBook(input) {
   };
 }
 
+const insertBookStatement = db.prepare(`
+  INSERT INTO books (
+    user_id, isbn, title, author, series, series_number, collection_name,
+    cover_url, cover_options, genre, page_count, published_year, publisher,
+    description, source, source_id, status, read_status, formats
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+function insertBook(userId, book) {
+  return insertBookStatement.run(
+    userId, book.isbn, book.title, book.author, book.series, book.seriesNumber,
+    book.collection, book.coverUrl, JSON.stringify(book.coverOptions), book.genre,
+    book.pageCount, book.publishedYear, book.publisher, book.description, book.source,
+    book.sourceId, book.status, book.readStatus, JSON.stringify(book.formats),
+  );
+}
+
 async function api(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/health") return send(res, 200, { status: "ok" });
   if (req.method === "POST" && url.pathname === "/api/auth/login") {
@@ -258,11 +276,26 @@ async function api(req, res, url) {
     if (cached?.expiresAt > Date.now()) return send(res, 200, cached.value);
     const result = await lookupBooks(query, type, {
       googleApiKey: process.env.GOOGLE_BOOKS_API_KEY,
+      hardcoverToken: process.env.HARDCOVER_API_TOKEN,
       timeoutMs: process.env.BOOK_LOOKUP_TIMEOUT_MS,
     });
     if (bookLookupCache.size >= 100) bookLookupCache.delete(bookLookupCache.keys().next().value);
     bookLookupCache.set(cacheKey, { value: result, expiresAt: Date.now() + 10 * 60 * 1000 });
     audit("book_lookup", req, { userId: user.id, type, resultCount: result.results.length });
+    return send(res, 200, result);
+  }
+  if (req.method === "GET" && url.pathname === "/api/series-search") {
+    const query = String(url.searchParams.get("q") || "").trim().slice(0, 150);
+    const limitKey = `${user.id}:${clientAddress(req)}`;
+    if (!consumeLimit(bookLookupAttempts, limitKey, bookLookupLimit, bookLookupWindowMs)) {
+      audit("series_lookup_rate_limited", req, { userId: user.id });
+      return send(res, 429, { error: "Too many book searches. Try again in a few minutes." }, { "Retry-After": "300" });
+    }
+    const result = await lookupSeries(query, {
+      hardcoverToken: process.env.HARDCOVER_API_TOKEN,
+      timeoutMs: process.env.BOOK_LOOKUP_TIMEOUT_MS,
+    });
+    audit("series_lookup", req, { userId: user.id, provider: result.provider, resultCount: result.books.length });
     return send(res, 200, result);
   }
   if (req.method === "GET" && url.pathname === "/api/books") {
@@ -282,23 +315,75 @@ async function api(req, res, url) {
       : db.prepare("SELECT * FROM books WHERE user_id = ? ORDER BY created_at DESC, id DESC").all(user.id);
     return send(res, 200, { books: rows.map(publicBook) });
   }
+  if (req.method === "POST" && url.pathname === "/api/books/bulk") {
+    const body = await jsonBody(req, maxBulkBodyBytes);
+    if (!Array.isArray(body.books) || !body.books.length || body.books.length > 100) {
+      return send(res, 400, { error: "Select between 1 and 100 books to import" });
+    }
+    if (body.books.some(book => !["owned", "wishlist"].includes(book?.status))) {
+      return send(res, 400, { error: "Imported books must be assigned to the collection or wishlist" });
+    }
+    const books = body.books.map(validatedBook);
+    const created = [];
+    const skipped = [];
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      for (const book of books) {
+        const duplicate = db.prepare(`
+          SELECT id FROM books
+          WHERE user_id = ? AND (
+            (? IS NOT NULL AND isbn = ?) OR
+            (lower(title) = lower(?) AND lower(author) = lower(?))
+          )
+          LIMIT 1
+        `).get(user.id, book.isbn, book.isbn, book.title, book.author);
+        if (duplicate) {
+          skipped.push({ title: book.title, reason: "Already in your library" });
+          continue;
+        }
+        const result = insertBook(user.id, book);
+        created.push(publicBook(db.prepare("SELECT * FROM books WHERE id = ? AND user_id = ?")
+          .get(result.lastInsertRowid, user.id)));
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch {}
+      throw error;
+    }
+    audit("book_series_imported", req, { userId: user.id, created: created.length, skipped: skipped.length });
+    return send(res, 201, { books: created, skipped });
+  }
   if (req.method === "POST" && url.pathname === "/api/books") {
     const book = validatedBook(await jsonBody(req));
-    const result = db.prepare(`
-      INSERT INTO books (
-        user_id, isbn, title, author, series, series_number, collection_name,
-        cover_url, cover_options, genre, page_count, published_year, publisher,
-        description, source, source_id, status, read_status, formats
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      user.id, book.isbn, book.title, book.author, book.series, book.seriesNumber,
-      book.collection, book.coverUrl, JSON.stringify(book.coverOptions), book.genre,
-      book.pageCount, book.publishedYear, book.publisher, book.description, book.source,
-      book.sourceId, book.status, book.readStatus, JSON.stringify(book.formats),
-    );
+    const result = insertBook(user.id, book);
     const created = db.prepare("SELECT * FROM books WHERE id = ? AND user_id = ?").get(result.lastInsertRowid, user.id);
     audit("book_created", req, { userId: user.id, bookId: Number(result.lastInsertRowid), source: book.source });
     return send(res, 201, { book: publicBook(created) });
+  }
+  const bookMatch = url.pathname.match(/^\/api\/books\/([1-9]\d*)$/);
+  if (req.method === "PUT" && bookMatch) {
+    const bookId = Number(bookMatch[1]);
+    if (!Number.isSafeInteger(bookId)) return send(res, 400, { error: "Invalid book ID" });
+    const book = validatedBook(await jsonBody(req));
+    const result = db.prepare(`
+      UPDATE books SET
+        isbn = ?, title = ?, author = ?, series = ?, series_number = ?,
+        collection_name = ?, cover_url = ?, cover_options = ?, genre = ?,
+        page_count = ?, published_year = ?, publisher = ?, description = ?,
+        source = ?, source_id = ?, status = ?, read_status = ?, formats = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND user_id = ?
+    `).run(
+      book.isbn, book.title, book.author, book.series, book.seriesNumber,
+      book.collection, book.coverUrl, JSON.stringify(book.coverOptions), book.genre,
+      book.pageCount, book.publishedYear, book.publisher, book.description, book.source,
+      book.sourceId, book.status, book.readStatus, JSON.stringify(book.formats),
+      bookId, user.id,
+    );
+    if (!result.changes) return send(res, 404, { error: "Book not found" });
+    const updated = db.prepare("SELECT * FROM books WHERE id = ? AND user_id = ?").get(bookId, user.id);
+    audit("book_updated", req, { userId: user.id, bookId });
+    return send(res, 200, { book: publicBook(updated) });
   }
   const bookStatusMatch = url.pathname.match(/^\/api\/books\/([1-9]\d*)\/status$/);
   if (req.method === "PATCH" && bookStatusMatch) {
