@@ -3,7 +3,8 @@ import { Check, ImageOff, Loader2, Search } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/auth';
-import { BookFormat, BookSearchResult, CoverOption, UserBook } from '@/types/book';
+import { BookBinding, BookCondition, BookFormat, BookSearchResult, CoverOption, UserBook } from '@/types/book';
+import { bindingLabels, conditionLabels } from '@/lib/book-copy';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,6 +18,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 
 type Providers = {
   googleBooks: 'available' | 'unavailable';
@@ -43,6 +45,13 @@ type Draft = {
   formats: BookFormat[];
   status: 'owned' | 'wishlist' | 'backlog';
   readStatus: 'read' | 'unread' | 'reading';
+  binding: BookBinding | '';
+  edition: string;
+  conditionGrade: BookCondition | '';
+  conditionNotes: string;
+  loanedOut: boolean;
+  loanedTo: string;
+  loanedAt: string;
 };
 
 const formatLabels: Record<BookFormat, string> = {
@@ -76,6 +85,13 @@ function draftFromBook(userBook: UserBook): Draft {
     formats: userBook.formats.length ? userBook.formats : ['physical'],
     status: userBook.status,
     readStatus: userBook.readStatus,
+    binding: book.binding || '',
+    edition: book.edition || '',
+    conditionGrade: userBook.conditionGrade || '',
+    conditionNotes: userBook.conditionNotes || '',
+    loanedOut: userBook.loanedOut,
+    loanedTo: userBook.loanedTo || '',
+    loanedAt: userBook.loanedAt || '',
   };
 }
 
@@ -165,6 +181,7 @@ export default function EditBookDialog({
         }),
       });
       await queryClient.invalidateQueries({ queryKey: ['books'] });
+      await queryClient.invalidateQueries({ queryKey: ['book-duplicates'] });
       toast.success(`Updated “${draft.title}”`);
       onOpenChange(false);
     } catch (error) {
@@ -180,7 +197,7 @@ export default function EditBookDialog({
         <DialogHeader>
           <DialogTitle>Edit book</DialogTitle>
           <DialogDescription>
-            Update its metadata, location, cover, ownership, and whether you have read it.
+            Update its metadata, cover, ownership, reading status, condition, and loan details.
           </DialogDescription>
         </DialogHeader>
 
@@ -301,6 +318,51 @@ export default function EditBookDialog({
                   <Label htmlFor="edit-series-number">Series position</Label>
                   <Input id="edit-series-number" maxLength={30} value={draft.seriesNumber} onChange={event => update('seriesNumber', event.target.value)} />
                 </div>
+                <div className="sm:col-span-2 border-t border-border pt-2">
+                  <h3 className="font-heading font-semibold">Copy details</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">These details apply to this physical copy, not every edition.</p>
+                </div>
+                <div>
+                  <Label htmlFor="edit-binding">Binding</Label>
+                  <select id="edit-binding" value={draft.binding} onChange={event => update('binding', event.target.value as Draft['binding'])} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    <option value="">Not set</option>
+                    {(Object.entries(bindingLabels) as [BookBinding, string][]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <Label htmlFor="edit-edition">Edition</Label>
+                  <Input id="edit-edition" maxLength={150} placeholder="e.g. First edition or Limited edition" value={draft.edition} onChange={event => update('edition', event.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="edit-condition">Condition</Label>
+                  <select id="edit-condition" value={draft.conditionGrade} onChange={event => update('conditionGrade', event.target.value as Draft['conditionGrade'])} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    <option value="">Not set</option>
+                    {(Object.entries(conditionLabels) as [BookCondition, string][]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-md border border-border px-3 py-2">
+                  <div>
+                    <Label htmlFor="edit-loaned">Loaned out</Label>
+                    <p className="text-xs text-muted-foreground">{draft.status === 'owned' ? 'Track who has this copy.' : 'Only collection books can be loaned.'}</p>
+                  </div>
+                  <Switch id="edit-loaned" checked={draft.loanedOut && draft.status === 'owned'} disabled={draft.status !== 'owned'} onCheckedChange={value => update('loanedOut', value)} />
+                </div>
+                <div className="sm:col-span-2">
+                  <Label htmlFor="edit-condition-notes">Condition / damage notes</Label>
+                  <Textarea id="edit-condition-notes" maxLength={2000} rows={3} placeholder="e.g. Bent corners, broken spine, highlighting" value={draft.conditionNotes} onChange={event => update('conditionNotes', event.target.value)} />
+                </div>
+                {draft.loanedOut && draft.status === 'owned' && (
+                  <>
+                    <div>
+                      <Label htmlFor="edit-loaned-to">Loaned to</Label>
+                      <Input id="edit-loaned-to" maxLength={150} placeholder="Name or note" value={draft.loanedTo} onChange={event => update('loanedTo', event.target.value)} />
+                    </div>
+                    <div>
+                      <Label htmlFor="edit-loaned-at">Loaned date</Label>
+                      <Input id="edit-loaned-at" type="date" value={draft.loanedAt} onChange={event => update('loanedAt', event.target.value)} />
+                    </div>
+                  </>
+                )}
                 <div className="sm:col-span-2">
                   <Label>Formats</Label>
                   <div className="mt-2 flex flex-wrap gap-2">

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { BookOpen, Eye, Heart, ListTodo, Library, Layers, TrendingUp, Glasses } from 'lucide-react';
+import { BookOpen, Eye, Heart, ListTodo, Library, Layers, User, Glasses } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import BookCard from '@/components/BookCard';
 import EditBookDialog from '@/components/EditBookDialog';
@@ -25,7 +25,7 @@ export default function Dashboard() {
     { label: 'Wishlist', value: books.filter(book => book.status === 'wishlist').length, icon: Heart, color: 'text-chart-wishlist' },
     { label: 'Backlog', value: books.filter(book => book.status === 'backlog').length, icon: ListTodo, color: 'text-chart-backlog' },
     { label: 'Series', value: new Set(books.map(book => book.book.series).filter(Boolean)).size, icon: Layers, color: 'text-primary' },
-    { label: 'Unread', value: books.filter(book => book.readStatus === 'unread').length, icon: TrendingUp, color: 'text-muted-foreground' },
+    { label: 'Loaned Out', value: books.filter(book => book.status === 'owned' && book.loanedOut).length, icon: User, color: 'text-muted-foreground' },
   ], [books, currentlyReading.length, ownedBooks.length]);
 
   return (

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 const testDirectory = mkdtempSync(join(tmpdir(), "book-vault-api-"));
 process.env.DATABASE_PATH = join(testDirectory, "book-vault.sqlite");
@@ -16,6 +17,37 @@ let baseUrl;
 let cookie;
 
 beforeAll(async () => {
+  // Start from the pre-copy-details schema so every API integration run also
+  // proves that an existing Unraid database is migrated in place.
+  const legacyDatabase = new DatabaseSync(process.env.DATABASE_PATH);
+  legacyDatabase.exec(`
+    CREATE TABLE books (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      isbn TEXT,
+      title TEXT NOT NULL,
+      author TEXT NOT NULL,
+      series TEXT,
+      series_number TEXT,
+      collection_name TEXT,
+      cover_url TEXT,
+      cover_options TEXT NOT NULL DEFAULT '[]',
+      genre TEXT,
+      page_count INTEGER,
+      published_year INTEGER,
+      publisher TEXT,
+      description TEXT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      source_id TEXT,
+      status TEXT NOT NULL DEFAULT 'owned',
+      read_status TEXT NOT NULL DEFAULT 'unread',
+      formats TEXT NOT NULL DEFAULT '["physical"]',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  legacyDatabase.close();
+
   const module = await import("./server.mjs");
   server = module.server;
   const database = await import("./database.mjs");
@@ -39,6 +71,13 @@ afterAll(async () => {
 });
 
 describe("books API", () => {
+  it("migrates existing databases with the copy-detail fields", () => {
+    const columns = new Set(db.prepare("PRAGMA table_info(books)").all().map(column => column.name));
+    for (const column of ["binding", "edition", "condition_grade", "condition_notes", "loaned_out", "loaned_to", "loaned_at"]) {
+      expect(columns.has(column)).toBe(true);
+    }
+  });
+
   it("persists and searches collection and series metadata by ISBN", async () => {
     const createResponse = await fetch(`${baseUrl}/api/books`, {
       method: "POST",
@@ -155,6 +194,13 @@ describe("books API", () => {
         readStatus: "read",
         status: "owned",
         formats: ["physical", "ebook"],
+        binding: "hardcover",
+        edition: "First limited edition",
+        conditionGrade: "fair",
+        conditionNotes: "Bent corners and a broken spine",
+        loanedOut: true,
+        loanedTo: "Test Reader",
+        loanedAt: "2026-08-04",
       }),
     });
     expect(updateResponse.status).toBe(200);
@@ -163,14 +209,72 @@ describe("books API", () => {
       status: "owned",
       readStatus: "read",
       formats: ["physical", "ebook"],
+      conditionGrade: "fair",
+      conditionNotes: "Bent corners and a broken spine",
+      loanedOut: true,
+      loanedTo: "Test Reader",
+      loanedAt: "2026-08-04",
       book: {
         title: "Edited Book",
         author: "Updated Author",
         collection: "Edited Shelf",
         series: "Edited Series",
         seriesNumber: "3",
+        binding: "hardcover",
+        edition: "First limited edition",
       },
     });
+  });
+
+  it("finds duplicate owned copies across ISBN, binding, and edition differences", async () => {
+    const copies = [
+      {
+        title: "Duplicate Runner Book",
+        author: "Nora Duplicate",
+        isbn: "9780306406157",
+        binding: "paperback",
+        edition: "Book club edition",
+        conditionGrade: "good",
+        formats: ["physical"],
+        status: "owned",
+      },
+      {
+        title: "Duplicate Runner Book: Limited Hardcover Edition",
+        author: "Duplicate, Nora",
+        isbn: "9783161484100",
+        binding: "hardcover",
+        edition: "Signed first edition",
+        conditionGrade: "like_new",
+        formats: ["physical"],
+        status: "owned",
+      },
+      {
+        title: "Duplicate Runner Book",
+        author: "Nora Duplicate",
+        binding: "hardcover",
+        formats: ["physical"],
+        status: "wishlist",
+      },
+    ];
+    for (const copy of copies) {
+      const response = await fetch(`${baseUrl}/api/books`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: cookie },
+        body: JSON.stringify(copy),
+      });
+      expect(response.status).toBe(201);
+    }
+
+    const response = await fetch(`${baseUrl}/api/books/duplicates`, {
+      headers: { Cookie: cookie },
+    });
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    const group = payload.groups.find(candidate => candidate.title.startsWith("Duplicate Runner Book"));
+    expect(group.copies).toHaveLength(2);
+    expect(group.copies.map(copy => copy.book.binding).sort()).toEqual(["hardcover", "paperback"]);
+    expect(group.copies.map(copy => copy.book.edition).sort()).toEqual(["Book club edition", "Signed first edition"]);
+    expect(group.copies.every(copy => copy.status === "owned")).toBe(true);
   });
 
   it("bulk imports series choices and skips duplicates", async () => {

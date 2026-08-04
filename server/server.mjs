@@ -136,12 +136,19 @@ function publicBook(row) {
       publishedYear: row.published_year || undefined,
       publisher: row.publisher || undefined,
       description: row.description || undefined,
+      binding: row.binding || undefined,
+      edition: row.edition || undefined,
       source: row.source,
       sourceId: row.source_id || undefined,
     },
     status: row.status,
     readStatus: row.read_status,
     formats: parseJsonArray(row.formats),
+    conditionGrade: row.condition_grade || undefined,
+    conditionNotes: row.condition_notes || undefined,
+    loanedOut: Boolean(row.loaned_out),
+    loanedTo: row.loaned_to || undefined,
+    loanedAt: row.loaned_at || undefined,
     dateAdded: row.created_at,
   };
 }
@@ -162,9 +169,12 @@ function validatedBook(input) {
   const genre = boundedText(input.genre, 150);
   const description = boundedText(input.description, 5000);
   const sourceId = boundedText(input.sourceId, 100);
+  const edition = boundedText(input.edition, 150);
+  const conditionNotes = boundedText(input.conditionNotes, 2000);
+  const loanedTo = boundedText(input.loanedTo, 150);
   if (!title || !author) throw Object.assign(new Error("Title and author are required"), { status: 400 });
   if (rawIsbn && !isbn) throw Object.assign(new Error("ISBN must be a valid ISBN-10 or ISBN-13"), { status: 400 });
-  if ([collection, series, seriesNumber, publisher, genre, description, sourceId].some(value => value === null)) {
+  if ([collection, series, seriesNumber, publisher, genre, description, sourceId, edition, conditionNotes, loanedTo].some(value => value === null)) {
     throw Object.assign(new Error("One or more book fields are too long"), { status: 400 });
   }
 
@@ -201,11 +211,29 @@ function validatedBook(input) {
   const source = ["google_books", "open_library", "manual"].includes(input.source) ? input.source : "manual";
   const status = ["owned", "wishlist", "backlog"].includes(input.status) ? input.status : "owned";
   const readStatus = ["read", "unread", "reading"].includes(input.readStatus) ? input.readStatus : "unread";
+  const allowedBindings = new Set(["hardcover", "paperback", "mass_market_paperback", "library_binding", "spiral_bound", "other"]);
+  const binding = input.binding === "" || input.binding == null ? null : input.binding;
+  if (binding !== null && !allowedBindings.has(binding)) {
+    throw Object.assign(new Error("Invalid binding"), { status: 400 });
+  }
+  const allowedConditions = new Set(["new", "like_new", "good", "fair", "poor", "damaged"]);
+  const conditionGrade = input.conditionGrade === "" || input.conditionGrade == null ? null : input.conditionGrade;
+  if (conditionGrade !== null && !allowedConditions.has(conditionGrade)) {
+    throw Object.assign(new Error("Invalid book condition"), { status: 400 });
+  }
+  const rawLoanedAt = boundedText(input.loanedAt, 10);
+  if (rawLoanedAt === null || (rawLoanedAt && !/^\d{4}-\d{2}-\d{2}$/.test(rawLoanedAt))) {
+    throw Object.assign(new Error("Loan date must use YYYY-MM-DD"), { status: 400 });
+  }
+  const loanedOut = status === "owned" && input.loanedOut === true;
   return {
     title, author, isbn: isbn || null, collection: collection || null, series: series || null,
     seriesNumber: seriesNumber || null, publisher: publisher || null, genre: genre || null,
     description: description || null, sourceId: sourceId || null, coverUrl: coverUrl || null,
-    coverOptions, pageCount, publishedYear, formats, source, status, readStatus,
+    coverOptions, pageCount, publishedYear, formats, source, status, readStatus, binding,
+    edition: edition || null, conditionGrade, conditionNotes: conditionNotes || null,
+    loanedOut, loanedTo: loanedOut ? loanedTo || null : null,
+    loanedAt: loanedOut ? rawLoanedAt || null : null,
   };
 }
 
@@ -213,17 +241,68 @@ const insertBookStatement = db.prepare(`
   INSERT INTO books (
     user_id, isbn, title, author, series, series_number, collection_name,
     cover_url, cover_options, genre, page_count, published_year, publisher,
-    description, source, source_id, status, read_status, formats
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    description, binding, edition, condition_grade, condition_notes, loaned_out,
+    loaned_to, loaned_at, source, source_id, status, read_status, formats
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 function insertBook(userId, book) {
   return insertBookStatement.run(
     userId, book.isbn, book.title, book.author, book.series, book.seriesNumber,
     book.collection, book.coverUrl, JSON.stringify(book.coverOptions), book.genre,
-    book.pageCount, book.publishedYear, book.publisher, book.description, book.source,
-    book.sourceId, book.status, book.readStatus, JSON.stringify(book.formats),
+    book.pageCount, book.publishedYear, book.publisher, book.description, book.binding,
+    book.edition, book.conditionGrade, book.conditionNotes, book.loanedOut ? 1 : 0,
+    book.loanedTo, book.loanedAt, book.source, book.sourceId, book.status, book.readStatus,
+    JSON.stringify(book.formats),
   );
+}
+
+function normalizedDuplicateText(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/\p{Mark}/gu, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function duplicateWorkKey(row) {
+  const editionTerms = "edition|hardcover|hardback|paperback|softback|mass market|limited|collector'?s?|deluxe|special|anniversary|reprint";
+  const titleWithoutEdition = String(row.title || "")
+    .replace(new RegExp(`\\([^)]*(?:${editionTerms})[^)]*\\)`, "gi"), " ")
+    .replace(new RegExp(`\\[[^\\]]*(?:${editionTerms})[^\\]]*\\]`, "gi"), " ")
+    .replace(new RegExp(`\\s*[-:]\\s*[^-:]*(?:${editionTerms})[^-:]*$`, "gi"), " ")
+    .replace(/\s+(?:first|1st|second|2nd|third|3rd|limited|collector'?s?|deluxe|special|anniversary|revised)\s+edition\s*$/gi, " ")
+    .replace(/\s+(?:hardcover|hardback|paperback|softback|mass market paperback|reprint)\s*$/gi, " ");
+  const normalizedTitle = normalizedDuplicateText(titleWithoutEdition);
+  const normalizedAuthor = normalizedDuplicateText(row.author)
+    .split(" ")
+    .filter(word => word && !["by", "author", "editor", "edited", "illustrated"].includes(word))
+    .sort()
+    .join(" ");
+  return normalizedTitle && normalizedAuthor ? `${normalizedTitle}\u0000${normalizedAuthor}` : "";
+}
+
+function duplicateGroups(rows) {
+  const candidates = new Map();
+  for (const row of rows) {
+    const key = duplicateWorkKey(row);
+    if (!key) continue;
+    const group = candidates.get(key) || [];
+    group.push(row);
+    candidates.set(key, group);
+  }
+  return [...candidates.entries()]
+    .filter(([, copies]) => copies.length > 1)
+    .map(([key, copies]) => ({
+      key,
+      title: copies[0].title,
+      author: copies[0].author,
+      copies: copies.map(publicBook),
+    }))
+    .sort((left, right) => right.copies.length - left.copies.length || left.title.localeCompare(right.title));
 }
 
 async function api(req, res, url) {
@@ -298,6 +377,20 @@ async function api(req, res, url) {
     audit("series_lookup", req, { userId: user.id, provider: result.provider, resultCount: result.books.length });
     return send(res, 200, result);
   }
+  if (req.method === "GET" && url.pathname === "/api/books/duplicates") {
+    const rows = db.prepare(`
+      SELECT * FROM books
+      WHERE user_id = ? AND status = 'owned'
+      ORDER BY title COLLATE NOCASE, author COLLATE NOCASE, created_at DESC, id DESC
+    `).all(user.id);
+    const groups = duplicateGroups(rows);
+    return send(res, 200, {
+      groups,
+      totalGroups: groups.length,
+      totalCopies: groups.reduce((count, group) => count + group.copies.length, 0),
+      scannedBooks: rows.length,
+    });
+  }
   if (req.method === "GET" && url.pathname === "/api/books") {
     const query = String(url.searchParams.get("q") || "").trim().slice(0, 100);
     const rows = query
@@ -370,14 +463,18 @@ async function api(req, res, url) {
         isbn = ?, title = ?, author = ?, series = ?, series_number = ?,
         collection_name = ?, cover_url = ?, cover_options = ?, genre = ?,
         page_count = ?, published_year = ?, publisher = ?, description = ?,
-        source = ?, source_id = ?, status = ?, read_status = ?, formats = ?,
+        binding = ?, edition = ?, condition_grade = ?, condition_notes = ?,
+        loaned_out = ?, loaned_to = ?, loaned_at = ?, source = ?, source_id = ?,
+        status = ?, read_status = ?, formats = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND user_id = ?
     `).run(
       book.isbn, book.title, book.author, book.series, book.seriesNumber,
       book.collection, book.coverUrl, JSON.stringify(book.coverOptions), book.genre,
-      book.pageCount, book.publishedYear, book.publisher, book.description, book.source,
-      book.sourceId, book.status, book.readStatus, JSON.stringify(book.formats),
+      book.pageCount, book.publishedYear, book.publisher, book.description, book.binding,
+      book.edition, book.conditionGrade, book.conditionNotes, book.loanedOut ? 1 : 0,
+      book.loanedTo, book.loanedAt, book.source, book.sourceId, book.status, book.readStatus,
+      JSON.stringify(book.formats),
       bookId, user.id,
     );
     if (!result.changes) return send(res, 404, { error: "Book not found" });

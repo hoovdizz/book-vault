@@ -1,6 +1,7 @@
 import { UserBook } from '@/types/book';
 import { Star, BookOpen, MapPin, Book, Headphones, Tablet } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { bindingLabels, conditionLabels } from '@/lib/book-copy';
 
 interface BookCardProps {
   userBook: UserBook;
@@ -60,7 +61,14 @@ export default function BookCard({ userBook, compact, onSelect }: BookCardProps)
             {readStatus === 'read' ? 'Read' : readStatus === 'reading' ? 'Reading' : 'Unread'}
           </Badge>
         </div>
-        {priority && (
+        {userBook.loanedOut && (
+          <div className="absolute left-2 top-2">
+            <Badge className="bg-amber-500 text-[10px] text-amber-950 hover:bg-amber-500">
+              Loaned
+            </Badge>
+          </div>
+        )}
+        {priority && !userBook.loanedOut && (
           <div className="absolute top-2 left-2">
             <Badge className={
               priority === 'high' ? 'bg-destructive text-destructive-foreground text-[10px]' :
@@ -99,6 +107,19 @@ export default function BookCard({ userBook, compact, onSelect }: BookCardProps)
           )}
           {book.collection && (
             <p className="text-[10px] text-muted-foreground font-medium">{book.collection}</p>
+          )}
+          {(book.binding || book.edition) && (
+            <p className="line-clamp-1 text-[10px] text-muted-foreground">
+              {[book.binding && bindingLabels[book.binding], book.edition].filter(Boolean).join(' · ')}
+            </p>
+          )}
+          {(userBook.conditionGrade || userBook.loanedOut) && (
+            <p className="line-clamp-1 text-[10px] font-medium text-muted-foreground">
+              {[
+                userBook.conditionGrade && `${conditionLabels[userBook.conditionGrade]} condition`,
+                userBook.loanedOut && `Loaned${userBook.loanedTo ? ` to ${userBook.loanedTo}` : ''}`,
+              ].filter(Boolean).join(' · ')}
+            </p>
           )}
 
           <div className="flex items-center justify-between pt-1">

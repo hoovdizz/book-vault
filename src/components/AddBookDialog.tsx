@@ -3,7 +3,8 @@ import { BookOpen, Check, ImageOff, Loader2, Search } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/auth';
-import { BookFormat, BookSearchResult, CoverOption } from '@/types/book';
+import { BookBinding, BookCondition, BookFormat, BookSearchResult, CoverOption } from '@/types/book';
+import { bindingLabels, conditionLabels } from '@/lib/book-copy';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 
 type SearchType = 'auto' | 'title' | 'isbn';
 type Providers = {
@@ -44,6 +46,13 @@ type Draft = {
   source: 'google_books' | 'open_library' | 'manual';
   sourceId: string;
   formats: BookFormat[];
+  binding: BookBinding | '';
+  edition: string;
+  conditionGrade: BookCondition | '';
+  conditionNotes: string;
+  loanedOut: boolean;
+  loanedTo: string;
+  loanedAt: string;
 };
 
 const emptyDraft: Draft = {
@@ -63,6 +72,13 @@ const emptyDraft: Draft = {
   source: 'manual',
   sourceId: '',
   formats: ['physical'],
+  binding: '',
+  edition: '',
+  conditionGrade: '',
+  conditionNotes: '',
+  loanedOut: false,
+  loanedTo: '',
+  loanedAt: '',
 };
 
 const formatLabels: Record<BookFormat, string> = {
@@ -212,6 +228,13 @@ export default function AddBookDialog({
       source: result.source,
       sourceId: result.sourceId,
       formats: ['physical'],
+      binding: '',
+      edition: '',
+      conditionGrade: '',
+      conditionNotes: '',
+      loanedOut: false,
+      loanedTo: '',
+      loanedAt: '',
     });
     setStep('details');
   }
@@ -253,6 +276,7 @@ export default function AddBookDialog({
         }),
       });
       await queryClient.invalidateQueries({ queryKey: ['books'] });
+      await queryClient.invalidateQueries({ queryKey: ['book-duplicates'] });
       toast.success(`Added “${draft.title}” to your ${isWishlist ? 'wishlist' : 'collection'}`);
       handleOpenChange(false);
     } catch (error) {
@@ -440,6 +464,55 @@ export default function AddBookDialog({
                   <Label htmlFor="book-series-number">Series position</Label>
                   <Input id="book-series-number" maxLength={30} placeholder="e.g. 1 or 1.5" value={draft.seriesNumber} onChange={event => update('seriesNumber', event.target.value)} />
                 </div>
+                <div className="sm:col-span-2 border-t border-border pt-2">
+                  <h3 className="font-heading font-semibold">Copy details</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">Describe this specific copy so other editions remain distinct.</p>
+                </div>
+                <div>
+                  <Label htmlFor="book-binding">Binding</Label>
+                  <select id="book-binding" value={draft.binding} onChange={event => update('binding', event.target.value as Draft['binding'])} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    <option value="">Not set</option>
+                    {(Object.entries(bindingLabels) as [BookBinding, string][]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <Label htmlFor="book-edition">Edition</Label>
+                  <Input id="book-edition" maxLength={150} placeholder="e.g. First edition or Limited edition" value={draft.edition} onChange={event => update('edition', event.target.value)} />
+                </div>
+                {!isWishlist && (
+                  <>
+                    <div>
+                      <Label htmlFor="book-condition">Condition</Label>
+                      <select id="book-condition" value={draft.conditionGrade} onChange={event => update('conditionGrade', event.target.value as Draft['conditionGrade'])} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                        <option value="">Not set</option>
+                        {(Object.entries(conditionLabels) as [BookCondition, string][]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex items-center justify-between gap-4 rounded-md border border-border px-3 py-2">
+                      <div>
+                        <Label htmlFor="book-loaned">Loaned out</Label>
+                        <p className="text-xs text-muted-foreground">Track who has this copy.</p>
+                      </div>
+                      <Switch id="book-loaned" checked={draft.loanedOut} onCheckedChange={value => update('loanedOut', value)} />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="book-condition-notes">Condition / damage notes</Label>
+                      <Textarea id="book-condition-notes" maxLength={2000} rows={3} placeholder="e.g. Bent corners, broken spine, highlighting" value={draft.conditionNotes} onChange={event => update('conditionNotes', event.target.value)} />
+                    </div>
+                    {draft.loanedOut && (
+                      <>
+                        <div>
+                          <Label htmlFor="book-loaned-to">Loaned to</Label>
+                          <Input id="book-loaned-to" maxLength={150} placeholder="Name or note" value={draft.loanedTo} onChange={event => update('loanedTo', event.target.value)} />
+                        </div>
+                        <div>
+                          <Label htmlFor="book-loaned-at">Loaned date</Label>
+                          <Input id="book-loaned-at" type="date" value={draft.loanedAt} onChange={event => update('loanedAt', event.target.value)} />
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
                 <div className="sm:col-span-2">
                   <Label>Formats</Label>
                   <div className="mt-2 flex flex-wrap gap-2">

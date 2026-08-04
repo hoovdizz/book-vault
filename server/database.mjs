@@ -59,6 +59,14 @@ db.exec(`
     published_year INTEGER,
     publisher TEXT,
     description TEXT,
+    binding TEXT,
+    edition TEXT,
+    condition_grade TEXT
+      CHECK(condition_grade IS NULL OR condition_grade IN ('new', 'like_new', 'good', 'fair', 'poor', 'damaged')),
+    condition_notes TEXT,
+    loaned_out INTEGER NOT NULL DEFAULT 0 CHECK(loaned_out IN (0, 1)),
+    loaned_to TEXT,
+    loaned_at TEXT,
     source TEXT NOT NULL DEFAULT 'manual'
       CHECK(source IN ('google_books', 'open_library', 'manual')),
     source_id TEXT,
@@ -74,6 +82,23 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_books_user_isbn ON books(user_id, isbn);
   CREATE INDEX IF NOT EXISTS idx_books_user_title ON books(user_id, title COLLATE NOCASE);
 `);
+
+// Older BookVault databases are migrated in place so container upgrades keep
+// every existing book and do not require a separate migration command.
+const bookColumns = new Set(db.prepare("PRAGMA table_info(books)").all().map(column => column.name));
+const bookColumnMigrations = [
+  ["binding", "TEXT"],
+  ["edition", "TEXT"],
+  ["condition_grade", "TEXT"],
+  ["condition_notes", "TEXT"],
+  ["loaned_out", "INTEGER NOT NULL DEFAULT 0"],
+  ["loaned_to", "TEXT"],
+  ["loaned_at", "TEXT"],
+];
+for (const [name, definition] of bookColumnMigrations) {
+  if (!bookColumns.has(name)) db.exec(`ALTER TABLE books ADD COLUMN ${name} ${definition}`);
+}
+db.exec("CREATE INDEX IF NOT EXISTS idx_books_user_status_title_author ON books(user_id, status, title COLLATE NOCASE, author COLLATE NOCASE)");
 
 export function passwordError(password) {
   const bytes = Buffer.byteLength(String(password || ""), "utf8");

@@ -111,6 +111,7 @@ export default function AddSeriesDialog({
         body: JSON.stringify({ books: selected }),
       });
       await queryClient.invalidateQueries({ queryKey: ['books'] });
+      await queryClient.invalidateQueries({ queryKey: ['book-duplicates'] });
       const skipped = response.skipped.length ? `; ${response.skipped.length} already existed` : '';
       toast.success(`Added ${response.books.length} series book${response.books.length === 1 ? '' : 's'}${skipped}`);
       close(false);

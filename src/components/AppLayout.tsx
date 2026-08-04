@@ -1,4 +1,4 @@
-import { BookOpen, Library, ListTodo, Heart, Layers, BarChart3, User, Search } from 'lucide-react';
+import { BookOpen, Library, ListTodo, Heart, Layers, BarChart3, User, Search, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Link, usePathname } from '@/lib/router';
 
@@ -8,6 +8,7 @@ const navItems = [
   { to: '/backlog', icon: ListTodo, label: 'Backlog' },
   { to: '/wishlist', icon: Heart, label: 'Wishlist' },
   { to: '/series', icon: Layers, label: 'Series' },
+  { to: '/duplicates', icon: Copy, label: 'Duplicates' },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

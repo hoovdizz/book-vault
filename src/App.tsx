@@ -14,6 +14,7 @@ const Collection = lazy(() => import("@/pages/Collection"));
 const Backlog = lazy(() => import("@/pages/Backlog"));
 const Wishlist = lazy(() => import("@/pages/Wishlist"));
 const SeriesPage = lazy(() => import("@/pages/SeriesPage"));
+const Duplicates = lazy(() => import("@/pages/Duplicates"));
 const Profile = lazy(() => import("@/pages/Profile"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
@@ -30,7 +31,7 @@ const ProtectedApp = () => {
       {(() => {
         const pages: Record<string, React.ReactNode> = {
           "/": <Dashboard />, "/collection": <Collection />, "/backlog": <Backlog />,
-          "/wishlist": <Wishlist />, "/series": <SeriesPage />, "/profile": <Profile />,
+          "/wishlist": <Wishlist />, "/series": <SeriesPage />, "/duplicates": <Duplicates />, "/profile": <Profile />,
         };
         return (
           <Suspense fallback={<div className="grid min-h-[50vh] place-items-center text-muted-foreground">Loading page…</div>}>

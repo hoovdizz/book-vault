@@ -5,6 +5,8 @@ export interface CoverOption {
 }
 
 export type BookSource = 'google_books' | 'open_library' | 'manual';
+export type BookBinding = 'hardcover' | 'paperback' | 'mass_market_paperback' | 'library_binding' | 'spiral_bound' | 'other';
+export type BookCondition = 'new' | 'like_new' | 'good' | 'fair' | 'poor' | 'damaged';
 
 export interface Book {
   id: string;
@@ -21,6 +23,8 @@ export interface Book {
   publishedYear?: number;
   publisher?: string;
   description?: string;
+  binding?: BookBinding;
+  edition?: string;
   source?: BookSource;
   sourceId?: string;
 }
@@ -42,6 +46,11 @@ export interface UserBook {
   status: 'owned' | 'wishlist' | 'backlog';
   readStatus: 'read' | 'unread' | 'reading';
   formats: BookFormat[];
+  conditionGrade?: BookCondition;
+  conditionNotes?: string;
+  loanedOut: boolean;
+  loanedTo?: string;
+  loanedAt?: string;
   rating?: number;
   purchasePrice?: number;
   storageLocation?: string;

@@ -2,7 +2,7 @@
 
 BookVault is a self-hosted personal book-library interface packaged as one lightweight container. The web app, API, authentication, and embedded SQLite database all run together; no separate database container is required.
 
-Collection, Series, Dashboard, Backlog, and Wishlist all use books stored in SQLite and isolated per user.
+Collection, Series, Dashboard, Backlog, Wishlist, and Duplicate Finder all use books stored in SQLite and isolated per user.
 
 ## Container settings
 
@@ -23,6 +23,8 @@ Collection, Series, Dashboard, Backlog, and Wishlist all use books stored in SQL
 | `DATABASE_PATH` | `/config/book-vault.sqlite` | Embedded database file |
 
 The database uses SQLite WAL mode, similar to the embedded-database approach used by Sonarr and Radarr. Back up the complete `/config` directory, including any `-wal` and `-shm` files.
+
+Container upgrades automatically add new book-copy fields to an existing database in place. Existing accounts, books, and sessions are retained; keeping a current `/config` backup before any upgrade is still recommended.
 
 ## Install on Unraid
 
@@ -84,11 +86,13 @@ The admin environment variables create the first account only when the database 
 
 ### Add books
 
-Open **Collection → Add Book** or **Wishlist → Add to Wishlist** and search with a title, ISBN-10, or ISBN-13. Both buttons use the same provider search, metadata, and cover-selection flow; the Wishlist button automatically saves the book with a wishlist status. Select a result, choose a cover, then optionally record its collection, series, series position, and format before saving. Use **Move to Collection** on a wishlist title after purchasing it; the change is persisted in SQLite.
+Open **Collection → Add Book** or **Wishlist → Add to Wishlist** and search with a title, ISBN-10, or ISBN-13. Both buttons use the same provider search, metadata, and cover-selection flow; the Wishlist button automatically saves the book with a wishlist status. Select a result, choose a cover, then optionally record its collection, series, series position, format, binding, and edition before saving. Use **Move to Collection** on a wishlist title after purchasing it; the change is persisted in SQLite.
 
-Click any persisted book card to edit its metadata, cover, format, Collection/Wishlist/Backlog location, and **Unread / Currently reading / Read** status. The **More** button in the editor repeats the provider lookup and adds newly found cover editions without discarding the current cover.
+Click any persisted book card to edit its metadata, cover, format, Collection/Wishlist/Backlog location, and **Unread / Currently reading / Read** status. Each physical copy can also record its binding, edition, condition grade, free-form damage notes such as bent corners or a broken spine, and whether it is loaned out. A loan can include the borrower's name and loan date. Loaned books have a visible badge and are counted on the Dashboard. The **More** button in the editor repeats the provider lookup and adds newly found cover editions without discarding the current cover.
 
 Open **Series → Add Book Series**, search by series name, and review the returned volumes. Mark each new title as **Collection**, **Wishlist**, or **Skip**, or use the bulk selection buttons, then import the selected rows together. Existing ISBN/title matches are identified and are not duplicated.
+
+Open **Duplicates** and select **Run duplicate scan** to find works with two or more owned copies. Matching is intentionally independent of ISBN, binding, and edition, so hardcover, paperback, limited, first-edition, and reprint copies can appear together. Common edition wording and punctuation differences are normalized, and author word order is ignored. Wishlist and backlog entries are excluded because they are not owned copies. Click any result to correct its copy details, then select **Rerun scan**.
 
 An API key is not required, but Google may apply lower anonymous quotas. Add a restricted Google Books API key to `GOOGLE_BOOKS_API_KEY` in the Unraid template if Google searches regularly fall back to Open Library. The container requires outbound HTTPS access to:
 
@@ -115,6 +119,7 @@ Authenticated book endpoints:
 - `GET /api/book-search?q=...&type=auto|title|isbn` searches the metadata providers.
 - `GET /api/series-search?q=...` finds the books in a series, using Hardcover when configured and Open Library otherwise.
 - `GET /api/books?q=...` lists the signed-in user's books and optionally searches title, author, ISBN, collection, or series.
+- `GET /api/books/duplicates` scans the signed-in user's owned books for duplicate works across editions and bindings.
 - `POST /api/books` validates and stores a book for the signed-in user.
 - `POST /api/books/bulk` validates and imports up to 100 reviewed series books.
 - `PUT /api/books/:id` updates one of the signed-in user's books and reading status.

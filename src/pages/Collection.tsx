@@ -8,6 +8,7 @@ import EditBookDialog from '@/components/EditBookDialog';
 import { Button } from '@/components/ui/button';
 import { BookFormat, UserBook } from '@/types/book';
 import { api } from '@/lib/auth';
+import { bindingLabels, conditionLabels } from '@/lib/book-copy';
 
 export default function Collection() {
   const [view, setView] = useState<'grid' | 'list'>('grid');
@@ -30,7 +31,10 @@ export default function Collection() {
       ub.book.author.toLowerCase().includes(needle) ||
       ub.book.isbn?.toLowerCase().includes(needle) ||
       ub.book.collection?.toLowerCase().includes(needle) ||
-      ub.book.series?.toLowerCase().includes(needle);
+      ub.book.series?.toLowerCase().includes(needle) ||
+      ub.book.edition?.toLowerCase().includes(needle) ||
+      ub.loanedTo?.toLowerCase().includes(needle) ||
+      ub.conditionNotes?.toLowerCase().includes(needle);
     const matchesFormat = !formatFilter || ub.formats.includes(formatFilter);
     const matchesCollection = !collectionFilter || ub.book.collection === collectionFilter;
     return matchesSearch && matchesFormat && matchesCollection;
@@ -201,6 +205,16 @@ export default function Collection() {
                     {[
                       ub.book.collection,
                       ub.book.series && `${ub.book.series}${ub.book.seriesNumber ? ` #${ub.book.seriesNumber}` : ''}`,
+                    ].filter(Boolean).join(' · ')}
+                  </p>
+                )}
+                {(ub.book.binding || ub.book.edition || ub.conditionGrade || ub.loanedOut) && (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {[
+                      ub.book.binding && bindingLabels[ub.book.binding],
+                      ub.book.edition,
+                      ub.conditionGrade && `${conditionLabels[ub.conditionGrade]} condition`,
+                      ub.loanedOut && `Loaned${ub.loanedTo ? ` to ${ub.loanedTo}` : ''}`,
                     ].filter(Boolean).join(' · ')}
                   </p>
                 )}
