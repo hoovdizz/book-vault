@@ -80,7 +80,12 @@ export default function BookCard({ userBook, compact }: BookCardProps) {
           <p className="text-xs text-muted-foreground">{book.author}</p>
 
           {book.series && (
-            <p className="text-[10px] text-primary font-medium">{book.series} #{book.seriesNumber}</p>
+            <p className="text-[10px] text-primary font-medium">
+              {book.series}{book.seriesNumber ? ` #${book.seriesNumber}` : ''}
+            </p>
+          )}
+          {book.collection && (
+            <p className="text-[10px] text-muted-foreground font-medium">{book.collection}</p>
           )}
 
           <div className="flex items-center justify-between pt-1">

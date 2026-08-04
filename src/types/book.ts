@@ -1,16 +1,34 @@
+export interface CoverOption {
+  url: string;
+  source: string;
+  label: string;
+}
+
 export interface Book {
   id: string;
   isbn?: string;
   title: string;
   author: string;
   series?: string;
-  seriesNumber?: number;
+  seriesNumber?: string | number;
+  collection?: string;
   coverUrl?: string;
+  coverOptions?: CoverOption[];
   genre?: string;
   pageCount?: number;
   publishedYear?: number;
   publisher?: string;
   description?: string;
+  source?: 'google_books' | 'open_library' | 'manual';
+  sourceId?: string;
+}
+
+export interface BookSearchResult extends Omit<Book, 'id'> {
+  source: 'google_books' | 'open_library';
+  sourceLabel: string;
+  sourceId: string;
+  identifiers?: string[];
+  coverOptions: CoverOption[];
 }
 
 export type BookFormat = 'physical' | 'ebook' | 'audiobook';

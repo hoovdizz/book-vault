@@ -1,91 +1,117 @@
+import { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { mockSeries } from '@/data/mockData';
-import { Progress } from '@/components/ui/progress';
-import { BookOpen, Check, AlertCircle } from 'lucide-react';
+import { BookOpen, Layers } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/auth';
+import { UserBook } from '@/types/book';
+import { Badge } from '@/components/ui/badge';
+
+function seriesPosition(book: UserBook) {
+  const raw = book.book.seriesNumber;
+  if (raw == null || raw === '') return Number.POSITIVE_INFINITY;
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) ? numeric : Number.POSITIVE_INFINITY;
+}
 
 export default function SeriesPage() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['books'],
+    queryFn: () => api<{ books: UserBook[] }>('/api/books'),
+  });
+
+  const groups = useMemo(() => {
+    const bySeries = new Map<string, UserBook[]>();
+    for (const item of data?.books || []) {
+      if (item.status !== 'owned' || !item.book.series) continue;
+      const books = bySeries.get(item.book.series) || [];
+      books.push(item);
+      bySeries.set(item.book.series, books);
+    }
+    return [...bySeries.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, books]) => ({
+        name,
+        books: books.sort((left, right) =>
+          seriesPosition(left) - seriesPosition(right) || left.book.title.localeCompare(right.book.title)),
+      }));
+  }, [data?.books]);
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-heading font-bold text-foreground">Series Tracking</h1>
-        <p className="text-muted-foreground mt-1">Track your progress across book series</p>
+        <h1 className="text-3xl font-heading font-bold text-foreground">Series</h1>
+        <p className="mt-1 text-muted-foreground">Books grouped by the series metadata in your collection</p>
       </div>
 
-      <div className="space-y-4">
-        {mockSeries.map((series, i) => {
-          const ownedPercent = (series.ownedBooks / series.totalBooks) * 100;
-          const readPercent = (series.readBooks / series.totalBooks) * 100;
-          const missing = series.totalBooks - series.ownedBooks;
-
-          return (
-            <motion.div
-              key={series.id}
-              initial={{ opacity: 0, y: 12 }}
+      {isLoading ? (
+        <div className="py-16 text-center text-muted-foreground">Loading your series…</div>
+      ) : error ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-6 text-center text-destructive">
+          {error instanceof Error ? error.message : 'Could not load series'}
+        </div>
+      ) : groups.length ? (
+        <div className="space-y-5">
+          {groups.map((series, groupIndex) => (
+            <motion.section
+              key={series.name}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.08 }}
-              className="bg-card rounded-lg border border-border shadow-card p-5 space-y-4"
+              transition={{ delay: groupIndex * 0.05 }}
+              className="overflow-hidden rounded-xl border border-border bg-card shadow-card"
             >
-              <div className="flex items-start justify-between">
-                <div>
-                  <h2 className="text-xl font-heading font-bold text-foreground">{series.name}</h2>
-                  <p className="text-sm text-muted-foreground">{series.totalBooks} books in series</p>
-                </div>
-                {missing > 0 && (
-                  <div className="flex items-center gap-1 text-primary text-sm">
-                    <AlertCircle className="h-4 w-4" />
-                    {missing} missing
+              <header className="flex items-center justify-between border-b border-border px-5 py-4">
+                <div className="flex items-center gap-3">
+                  <span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-primary">
+                    <Layers className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <h2 className="font-heading text-xl font-bold text-foreground">{series.name}</h2>
+                    <p className="text-sm text-muted-foreground">
+                      {series.books.length} {series.books.length === 1 ? 'book' : 'books'} in your collection
+                    </p>
                   </div>
-                )}
-              </div>
+                </div>
+              </header>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="flex items-center justify-between text-sm mb-1.5">
-                    <span className="text-muted-foreground flex items-center gap-1">
-                      <BookOpen className="h-3.5 w-3.5" /> Owned
-                    </span>
-                    <span className="font-medium text-foreground">{series.ownedBooks}/{series.totalBooks}</span>
-                  </div>
-                  <Progress value={ownedPercent} className="h-2" />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between text-sm mb-1.5">
-                    <span className="text-muted-foreground flex items-center gap-1">
-                      <Check className="h-3.5 w-3.5" /> Read
-                    </span>
-                    <span className="font-medium text-foreground">{series.readBooks}/{series.totalBooks}</span>
-                  </div>
-                  <Progress value={readPercent} className="h-2" />
-                </div>
-              </div>
-
-              {/* Book list */}
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {series.books.map((item, idx) => {
-                  const isOwned = 'id' in item;
-                  const book = isOwned ? item.book : item.book;
-                  return (
-                    <div
-                      key={idx}
-                      className={`w-16 h-24 rounded overflow-hidden flex-shrink-0 border ${
-                        isOwned ? 'border-accent' : 'border-border opacity-40'
-                      }`}
-                    >
-                      {book.coverUrl ? (
-                        <img src={book.coverUrl} alt={book.title} className="w-full h-full object-cover" loading="lazy" />
+              <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                {series.books.map(item => (
+                  <div key={item.id} className="flex gap-3 rounded-lg border border-border bg-background/50 p-3">
+                    <div className="h-24 w-16 flex-shrink-0 overflow-hidden rounded bg-muted">
+                      {item.book.coverUrl ? (
+                        <img
+                          src={item.book.coverUrl}
+                          alt={`${item.book.title} cover`}
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                          onError={event => { event.currentTarget.src = '/placeholder.svg'; }}
+                        />
                       ) : (
-                        <div className="w-full h-full bg-muted flex items-center justify-center">
-                          <span className="text-[10px] text-muted-foreground text-center px-1">#{book.seriesNumber}</span>
+                        <div className="grid h-full place-items-center">
+                          <BookOpen className="h-6 w-6 text-muted-foreground/50" />
                         </div>
                       )}
                     </div>
-                  );
-                })}
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap gap-1">
+                        {item.book.seriesNumber && <Badge variant="secondary">#{item.book.seriesNumber}</Badge>}
+                        {item.book.collection && <Badge variant="outline">{item.book.collection}</Badge>}
+                      </div>
+                      <h3 className="line-clamp-2 font-heading font-semibold text-foreground">{item.book.title}</h3>
+                      <p className="line-clamp-1 text-sm text-muted-foreground">{item.book.author}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
-            </motion.div>
-          );
-        })}
-      </div>
+            </motion.section>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-border py-16 text-center text-muted-foreground">
+          <Layers className="mx-auto mb-3 h-9 w-9 opacity-50" />
+          <p className="font-heading text-lg">No series yet</p>
+          <p className="mt-1 text-sm">Add a series name when saving a book and it will appear here.</p>
+        </div>
+      )}
     </div>
   );
 }

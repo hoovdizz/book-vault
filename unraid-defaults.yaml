@@ -16,6 +16,8 @@ environment:
   PUID: "99"
   PGID: "100"
   DATABASE_PATH: /config/book-vault.sqlite
+  GOOGLE_BOOKS_API_KEY: ""
+  BOOK_LOOKUP_TIMEOUT_MS: "6000"
   SESSION_DAYS: "30"
   ADMIN_NAME: bookvaultadmin
   ADMIN_EMAIL: admin@bookvault.local

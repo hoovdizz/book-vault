@@ -15,10 +15,11 @@ ENV NODE_ENV=production \
     PUID=99 \
     PGID=100 \
     DATABASE_PATH=/config/book-vault.sqlite \
+    BOOK_LOOKUP_TIMEOUT_MS=6000 \
     SESSION_DAYS=30
 WORKDIR /app
 COPY --from=build /app/dist ./dist
-COPY server ./server
+COPY server/database.mjs server/server.mjs server/book-search.mjs ./server/
 COPY docker-entrypoint.sh /usr/local/bin/book-vault-entrypoint
 # npm is required only in the build stage. The runtime uses Node built-ins, so
 # remove npm/npx and their dependency tree from the published attack surface.

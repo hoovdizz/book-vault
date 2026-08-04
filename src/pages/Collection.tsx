@@ -1,26 +1,46 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Filter, Grid3X3, List, Plus, Book, Tablet, Headphones } from 'lucide-react';
-import { mockUserBooks } from '@/data/mockData';
+import { useQuery } from '@tanstack/react-query';
 import BookCard from '@/components/BookCard';
+import AddBookDialog from '@/components/AddBookDialog';
 import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
-import { BookFormat } from '@/types/book';
+import { BookFormat, UserBook } from '@/types/book';
+import { api } from '@/lib/auth';
 
 export default function Collection() {
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [search, setSearch] = useState('');
   const [formatFilter, setFormatFilter] = useState<BookFormat | null>(null);
+  const [collectionFilter, setCollectionFilter] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [showAddBook, setShowAddBook] = useState(false);
 
-  const ownedBooks = mockUserBooks.filter(ub => ub.status === 'owned');
-  const filtered = ownedBooks.filter(ub => {
-    const matchesSearch =
-      ub.book.title.toLowerCase().includes(search.toLowerCase()) ||
-      ub.book.author.toLowerCase().includes(search.toLowerCase());
-    const matchesFormat = !formatFilter || ub.formats.includes(formatFilter);
-    return matchesSearch && matchesFormat;
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['books'],
+    queryFn: () => api<{ books: UserBook[] }>('/api/books'),
   });
+  const ownedBooks = (data?.books || []).filter(book => book.status === 'owned');
+  const filtered = ownedBooks.filter(ub => {
+    const needle = search.toLowerCase();
+    const matchesSearch =
+      ub.book.title.toLowerCase().includes(needle) ||
+      ub.book.author.toLowerCase().includes(needle) ||
+      ub.book.isbn?.toLowerCase().includes(needle) ||
+      ub.book.collection?.toLowerCase().includes(needle) ||
+      ub.book.series?.toLowerCase().includes(needle);
+    const matchesFormat = !formatFilter || ub.formats.includes(formatFilter);
+    const matchesCollection = !collectionFilter || ub.book.collection === collectionFilter;
+    return matchesSearch && matchesFormat && matchesCollection;
+  });
+  const collections = useMemo(
+    () => [...new Set(ownedBooks.map(item => item.book.collection).filter((value): value is string => Boolean(value)))].sort(),
+    [ownedBooks],
+  );
+  const seriesNames = useMemo(
+    () => [...new Set(ownedBooks.map(item => item.book.series).filter((value): value is string => Boolean(value)))].sort(),
+    [ownedBooks],
+  );
 
   const formatOptions: { value: BookFormat; icon: typeof Book; label: string }[] = [
     { value: 'physical', icon: Book, label: 'Physical' },
@@ -38,7 +58,7 @@ export default function Collection() {
         <Button
           type="button"
           className="gradient-warm text-primary-foreground gap-2 w-fit"
-          onClick={() => toast.info('Add Book dialog coming soon — connect Lovable Cloud for full functionality.')}
+          onClick={() => setShowAddBook(true)}
         >
           <Plus className="h-4 w-4" />
           Add Book
@@ -51,7 +71,7 @@ export default function Collection() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search by title or author..."
+            placeholder="Search title, author, ISBN, collection, or series..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-2 rounded-md bg-card border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -101,11 +121,41 @@ export default function Collection() {
               {f.label}
             </Button>
           ))}
+          {collections.length > 0 && (
+            <>
+              <span className="ml-2 text-sm text-muted-foreground">Collection:</span>
+              <Button
+                type="button"
+                variant={collectionFilter === null ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setCollectionFilter(null)}
+              >
+                All
+              </Button>
+              {collections.map(collection => (
+                <Button
+                  key={collection}
+                  type="button"
+                  variant={collectionFilter === collection ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setCollectionFilter(collectionFilter === collection ? null : collection)}
+                >
+                  {collection}
+                </Button>
+              ))}
+            </>
+          )}
         </div>
       )}
 
       {/* Book Grid */}
-      {view === 'grid' ? (
+      {isLoading ? (
+        <div className="py-16 text-center text-muted-foreground">Loading your collection…</div>
+      ) : error ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-6 text-center text-destructive">
+          {error instanceof Error ? error.message : 'Could not load your collection'}
+        </div>
+      ) : view === 'grid' ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {filtered.map((ub, i) => (
             <motion.div
@@ -134,6 +184,14 @@ export default function Collection() {
               <div className="flex-1 min-w-0">
                 <h3 className="font-heading font-semibold text-foreground truncate">{ub.book.title}</h3>
                 <p className="text-sm text-muted-foreground">{ub.book.author}</p>
+                {(ub.book.collection || ub.book.series) && (
+                  <p className="truncate text-xs text-primary">
+                    {[
+                      ub.book.collection,
+                      ub.book.series && `${ub.book.series}${ub.book.seriesNumber ? ` #${ub.book.seriesNumber}` : ''}`,
+                    ].filter(Boolean).join(' · ')}
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-1">
                 {ub.formats.map(f => {
@@ -148,12 +206,21 @@ export default function Collection() {
         </div>
       )}
 
-      {filtered.length === 0 && (
+      {!isLoading && !error && filtered.length === 0 && (
         <div className="text-center py-16 text-muted-foreground">
           <p className="text-lg font-heading">No books found</p>
-          <p className="text-sm mt-1">Try a different search or filter</p>
+          <p className="text-sm mt-1">
+            {ownedBooks.length ? 'Try a different search or filter' : 'Use Add Book to start your persisted collection'}
+          </p>
         </div>
       )}
+
+      <AddBookDialog
+        open={showAddBook}
+        onOpenChange={setShowAddBook}
+        collections={collections}
+        seriesNames={seriesNames}
+      />
     </div>
   );
 }

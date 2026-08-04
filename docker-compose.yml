@@ -14,6 +14,8 @@ services:
       PUID: "${PUID:-99}"
       PGID: "${PGID:-100}"
       DATABASE_PATH: /config/book-vault.sqlite
+      GOOGLE_BOOKS_API_KEY: "${GOOGLE_BOOKS_API_KEY:-}"
+      BOOK_LOOKUP_TIMEOUT_MS: "6000"
       ADMIN_NAME: bookvaultadmin
       ADMIN_EMAIL: "${ADMIN_EMAIL:?Set ADMIN_EMAIL in your environment}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in your environment}"

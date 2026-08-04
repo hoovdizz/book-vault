@@ -2,7 +2,7 @@
 
 BookVault is a self-hosted personal book-library interface packaged as one lightweight container. The web app, API, authentication, and embedded SQLite database all run together; no separate database container is required.
 
-> The current book screens retain the original prototype's sample catalog. User accounts and sessions are persisted in SQLite. Persisting and editing the catalog is the next application-data milestone.
+The Collection and Series screens use books stored in SQLite per user. Dashboard, backlog, and wishlist still contain prototype sample data while those workflows are migrated.
 
 ## Container settings
 
@@ -13,6 +13,8 @@ BookVault is a self-hosted personal book-library interface packaged as one light
 | `TZ` | `America/New_York` | Container timezone |
 | `PUID` | `99` | Runtime user and `/config` owner (`nobody` on Unraid) |
 | `PGID` | `100` | Runtime group and `/config` group (`users` on Unraid) |
+| `GOOGLE_BOOKS_API_KEY` | optional | Server-side Google Books API key; Open Library remains available as fallback |
+| `BOOK_LOOKUP_TIMEOUT_MS` | `6000` | Per-provider lookup timeout, bounded to 2–10 seconds |
 | `ADMIN_NAME` | `bookvaultadmin` | Initial admin name, used only with a new database |
 | `ADMIN_EMAIL` | `admin@bookvault.local` in the Unraid template | Initial admin login, used only with a new database |
 | `ADMIN_PASSWORD` | `bookvaultpassword` in the Unraid template | Initial 12–128 character admin password |
@@ -70,11 +72,33 @@ Use **Add another Path, Port, Variable, Label or Device** to add:
 | Variable | Timezone | `TZ` | `America/New_York` |
 | Variable | User ID | `PUID` | `99` (`nobody` on Unraid) |
 | Variable | Group ID | `PGID` | `100` (`users` on Unraid) |
+| Variable | Google Books API key | `GOOGLE_BOOKS_API_KEY` | Optional API key, stored as a masked value |
+| Variable | Book lookup timeout | `BOOK_LOOKUP_TIMEOUT_MS` | `6000` |
 | Variable | Admin name | `ADMIN_NAME` | `bookvaultadmin` |
 | Variable | Admin email | `ADMIN_EMAIL` | `admin@bookvault.local` |
 | Variable | Admin password | `ADMIN_PASSWORD` | `bookvaultpassword` (change before first launch) |
 
 The admin environment variables create the first account only when the database is empty. Changing them later does not change an existing account.
+
+### Add books
+
+Open **Collection → Add Book** and search with a title, ISBN-10, or ISBN-13. BookVault queries Google Books and Open Library from the server, prioritizes Google metadata, uses Open Library when Google is unavailable, and combines available edition covers. Select a result, choose a cover, then record its collection, series, series position, and owned formats before saving.
+
+An API key is not required, but Google may apply lower anonymous quotas. Add a restricted Google Books API key to `GOOGLE_BOOKS_API_KEY` in the Unraid template if Google searches regularly fall back to Open Library. The container requires outbound HTTPS access to:
+
+- `www.googleapis.com`
+- `openlibrary.org`
+- `books.google.com`
+- `books.googleusercontent.com`
+- `covers.openlibrary.org`
+
+Book metadata and cover links come from the [Google Books API](https://developers.google.com/books/docs/v1/using) and the [Open Library Search and Covers APIs](https://openlibrary.org/developers/api).
+
+Authenticated book endpoints:
+
+- `GET /api/book-search?q=...&type=auto|title|isbn` searches the metadata providers.
+- `GET /api/books?q=...` lists the signed-in user's books and optionally searches title, author, ISBN, collection, or series.
+- `POST /api/books` validates and stores a book for the signed-in user.
 
 The requested human-readable defaults are in [`unraid-defaults.yaml`](unraid-defaults.yaml). Unraid does not read that YAML file; it imports [`unraid/book-vault.xml`](unraid/book-vault.xml). Unraid also saves a separate local copy for every created container and rewrites that copy when the container is edited.
 

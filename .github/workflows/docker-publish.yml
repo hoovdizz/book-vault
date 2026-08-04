@@ -18,6 +18,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Audit JavaScript dependencies
         run: npm audit --audit-level=high
+      - name: Test application
+        run: |
+          npm ci
+          npm test
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io

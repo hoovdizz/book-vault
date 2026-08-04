@@ -42,6 +42,39 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS books (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    isbn TEXT,
+    title TEXT NOT NULL,
+    author TEXT NOT NULL,
+    series TEXT,
+    series_number TEXT,
+    collection_name TEXT,
+    cover_url TEXT,
+    cover_options TEXT NOT NULL DEFAULT '[]',
+    genre TEXT,
+    page_count INTEGER,
+    published_year INTEGER,
+    publisher TEXT,
+    description TEXT,
+    source TEXT NOT NULL DEFAULT 'manual'
+      CHECK(source IN ('google_books', 'open_library', 'manual')),
+    source_id TEXT,
+    status TEXT NOT NULL DEFAULT 'owned'
+      CHECK(status IN ('owned', 'wishlist', 'backlog')),
+    read_status TEXT NOT NULL DEFAULT 'unread'
+      CHECK(read_status IN ('read', 'unread', 'reading')),
+    formats TEXT NOT NULL DEFAULT '["physical"]',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_books_user_created ON books(user_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_books_user_isbn ON books(user_id, isbn);
+  CREATE INDEX IF NOT EXISTS idx_books_user_title ON books(user_id, title COLLATE NOCASE);
+`);
+
 export function passwordError(password) {
   const bytes = Buffer.byteLength(String(password || ""), "utf8");
   if (bytes < MIN_PASSWORD_BYTES) return `Password must be at least ${MIN_PASSWORD_BYTES} characters`;
