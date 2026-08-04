@@ -1,0 +1,18 @@
+services:
+  book-vault:
+    build: .
+    image: ghcr.io/hoovdizz/book-vault:development
+    container_name: book-vault
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config:/config
+    environment:
+      TZ: America/New_York
+      PORT: "3000"
+      DATABASE_PATH: /config/book-vault.sqlite
+      ADMIN_NAME: BookVault Admin
+      ADMIN_EMAIL: admin@bookvault.local
+      ADMIN_PASSWORD: change-this-password
+      SESSION_DAYS: "30"

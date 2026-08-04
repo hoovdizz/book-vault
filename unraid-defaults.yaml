@@ -1,0 +1,20 @@
+name: BookVault
+repository: ghcr.io/hoovdizz/book-vault
+tag: development
+network: bridge
+web_ui: http://[IP]:[PORT:3000]
+ports:
+  - container: 3000
+    host: 3000
+    protocol: tcp
+paths:
+  - container: /config
+    host: /mnt/user/appdata/book-vault
+    access: read-write
+environment:
+  TZ: America/New_York
+  DATABASE_PATH: /config/book-vault.sqlite
+  SESSION_DAYS: "30"
+  ADMIN_NAME: BookVault Admin
+  ADMIN_EMAIL: admin@bookvault.local
+  ADMIN_PASSWORD: change-this-password

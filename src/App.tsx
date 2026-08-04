@@ -11,10 +11,16 @@ import Wishlist from "@/pages/Wishlist";
 import SeriesPage from "@/pages/SeriesPage";
 import Profile from "@/pages/Profile";
 import NotFound from "./pages/NotFound.tsx";
+import Login from "@/pages/Login";
+import { AuthProvider, useAuth } from "@/lib/auth";
 
 const queryClient = new QueryClient();
 
-const App = () => (
+const ProtectedApp = () => {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="min-h-screen grid place-items-center text-muted-foreground">Loading BookVault…</div>;
+  if (!user) return <Login />;
+  return (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
@@ -32,6 +38,9 @@ const App = () => (
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
-);
+  );
+};
+
+const App = () => <AuthProvider><ProtectedApp /></AuthProvider>;
 
 export default App;

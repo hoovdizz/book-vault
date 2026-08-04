@@ -1,10 +1,11 @@
 {
-  "name": "vite_react_shadcn_ts",
+  "name": "book-vault",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start": "node server/server.mjs",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",

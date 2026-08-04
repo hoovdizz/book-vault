@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>BookVault</Name>
+  <Repository>ghcr.io/hoovdizz/book-vault:development</Repository>
+  <Registry>https://github.com/hoovdizz/book-vault/pkgs/container/book-vault</Registry>
+  <Network>bridge</Network>
+  <WebUI>http://[IP]:[PORT:3000]</WebUI>
+  <Shell>sh</Shell>
+  <Support>https://github.com/hoovdizz/book-vault/issues</Support>
+  <Project>https://github.com/hoovdizz/book-vault</Project>
+  <Overview>Self-hosted personal book library with an embedded SQLite database and multiple user accounts.</Overview>
+  <Category>Tools: MediaApp:Other</Category>
+  <Config Name="Web UI Port" Target="3000" Default="3000" Mode="tcp" Description="BookVault web interface" Type="Port" Display="always" Required="true" Mask="false">3000</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/book-vault" Mode="rw" Description="SQLite database and persistent application data" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/book-vault</Config>
+  <Config Name="Timezone" Target="TZ" Default="America/New_York" Description="Container timezone" Type="Variable" Display="always" Required="true" Mask="false">America/New_York</Config>
+  <Config Name="Admin name" Target="ADMIN_NAME" Default="BookVault Admin" Description="Initial administrator display name (first run only)" Type="Variable" Display="always" Required="true" Mask="false">BookVault Admin</Config>
+  <Config Name="Admin email" Target="ADMIN_EMAIL" Default="admin@bookvault.local" Description="Initial administrator email (first run only)" Type="Variable" Display="always" Required="true" Mask="false">admin@bookvault.local</Config>
+  <Config Name="Admin password" Target="ADMIN_PASSWORD" Default="" Description="Initial administrator password (first run only; use 8+ characters)" Type="Variable" Display="always-hide" Required="true" Mask="true"></Config>
+</Container>
