@@ -11,9 +11,9 @@ BookVault is a self-hosted personal book-library interface packaged as one light
 | Container port | `8130` | Web interface and API |
 | `/config` | required | Persistent SQLite database location |
 | `TZ` | `America/New_York` | Container timezone |
-| `ADMIN_NAME` | `BookVault Admin` | Initial admin name, used only with a new database |
-| `ADMIN_EMAIL` | required | Initial admin login, used only with a new database |
-| `ADMIN_PASSWORD` | required | Initial 12–128 character admin password |
+| `ADMIN_NAME` | `bookvaultadmin` | Initial admin name, used only with a new database |
+| `ADMIN_EMAIL` | `admin@bookvault.local` in the Unraid template | Initial admin login, used only with a new database |
+| `ADMIN_PASSWORD` | `bookvaultpassword` in the Unraid template | Initial 12–128 character admin password |
 | `SESSION_DAYS` | `30` | Login session lifetime |
 | `DATABASE_PATH` | `/config/book-vault.sqlite` | Embedded database file |
 
@@ -39,7 +39,7 @@ Then:
 3. Use repository `ghcr.io/hoovdizz/book-vault:development`.
 4. Map `/config` to `/mnt/user/appdata/book-vault`.
 5. Map container port `8130` to an available host port, normally `8130`.
-6. Enter a valid admin email and a unique admin password of 12–128 characters. A new installation refuses to start without both settings.
+6. The template supplies `admin@bookvault.local` and `bookvaultpassword` for the initial login. Change the password before first launch, especially if the server is reachable by untrusted devices.
 7. Select **Apply**, then open `http://UNRAID-IP:8130`.
 
 To remove the locally installed template later:
@@ -66,13 +66,13 @@ Use **Add another Path, Port, Variable, Label or Device** to add:
 | Port | Web UI | `8130` | `8130` |
 | Path | Appdata | `/config` | `/mnt/user/appdata/book-vault` |
 | Variable | Timezone | `TZ` | `America/New_York` |
-| Variable | Admin name | `ADMIN_NAME` | `BookVault Admin` |
-| Variable | Admin email | `ADMIN_EMAIL` | Your email address |
-| Variable | Admin password | `ADMIN_PASSWORD` | A unique 12–128 character password |
+| Variable | Admin name | `ADMIN_NAME` | `bookvaultadmin` |
+| Variable | Admin email | `ADMIN_EMAIL` | `admin@bookvault.local` |
+| Variable | Admin password | `ADMIN_PASSWORD` | `bookvaultpassword` (change before first launch) |
 
 The admin environment variables create the first account only when the database is empty. Changing them later does not change an existing account.
 
-The requested human-readable defaults are in [`unraid-defaults.yaml`](unraid-defaults.yaml). Unraid itself imports XML templates, so [`unraid/book-vault.xml`](unraid/book-vault.xml) is the installable equivalent.
+The requested human-readable defaults are in [`unraid-defaults.yaml`](unraid-defaults.yaml). Unraid does not read that YAML file; it imports [`unraid/book-vault.xml`](unraid/book-vault.xml). Unraid also saves a separate local copy for every created container and rewrites that copy when the container is edited.
 
 ### Upgrade an existing development container
 
@@ -80,12 +80,13 @@ Pull the newest image and refresh the locally saved template:
 
 ```sh
 docker pull ghcr.io/hoovdizz/book-vault:development
+rm -f /boot/config/plugins/dockerMan/templates-user/my-book-vault.xml
 curl --fail --location \
   https://raw.githubusercontent.com/hoovdizz/book-vault/development/unraid/book-vault.xml \
   --output /boot/config/plugins/dockerMan/templates-user/my-book-vault.xml
 ```
 
-Updating a template does not change an already-created container. If the Docker page still shows TCP port `3000`, fix the existing container:
+Updating a template does not change an already-created container. Unraid keeps the existing container configuration when **Edit** is selected, even after the source template is replaced. If the Docker page still shows TCP port `3000`, fix the existing container:
 
 1. Select the BookVault icon and choose **Edit**.
 2. Find the existing Web UI port entry.

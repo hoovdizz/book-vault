@@ -3,6 +3,7 @@
   <Name>BookVault</Name>
   <Repository>ghcr.io/hoovdizz/book-vault:development</Repository>
   <Registry>https://github.com/hoovdizz/book-vault/pkgs/container/book-vault</Registry>
+  <TemplateURL>https://raw.githubusercontent.com/hoovdizz/book-vault/development/unraid/book-vault.xml</TemplateURL>
   <Network>bridge</Network>
   <WebUI>http://[IP]:[PORT:8130]</WebUI>
   <Shell>sh</Shell>
@@ -10,11 +11,11 @@
   <Project>https://github.com/hoovdizz/book-vault</Project>
   <Overview>Self-hosted personal book library with an embedded SQLite database and multiple user accounts.</Overview>
   <Category>Tools: MediaApp:Other</Category>
-  <Config Name="Web UI Port" Target="8130" Default="8130" Mode="tcp" Description="BookVault web interface" Type="Port" Display="always" Required="true" Mask="false">8130</Config>
-  <Config Name="Application Port" Target="PORT" Default="8130" Description="Internal BookVault listening port; keep this synchronized with the Web UI container port" Type="Variable" Display="advanced" Required="true" Mask="false">8130</Config>
+  <Config Name="Web UI Port" Target="8130" Default="8130" Mode="tcp" Description="BookVault web interface (host 8130 to container 8130)" Type="Port" Display="always" Required="true" Mask="false">8130</Config>
+  <Config Name="Application Port" Target="PORT" Default="8130" Description="Internal BookVault listening port; keep this set to 8130" Type="Variable" Display="advanced" Required="true" Mask="false">8130</Config>
   <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/book-vault" Mode="rw" Description="SQLite database and persistent application data" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/book-vault</Config>
   <Config Name="Timezone" Target="TZ" Default="America/New_York" Description="Container timezone" Type="Variable" Display="always" Required="true" Mask="false">America/New_York</Config>
-  <Config Name="Admin name" Target="ADMIN_NAME" Default="BookVault Admin" Description="Initial administrator display name (first run only)" Type="Variable" Display="always" Required="true" Mask="false">BookVault Admin</Config>
+  <Config Name="Admin name" Target="ADMIN_NAME" Default="bookvaultadmin" Description="Initial administrator display name (first run only)" Type="Variable" Display="always" Required="true" Mask="false">bookvaultadmin</Config>
   <Config Name="Admin email" Target="ADMIN_EMAIL" Default="admin@bookvault.local" Description="Initial administrator email (first run only)" Type="Variable" Display="always" Required="true" Mask="false">admin@bookvault.local</Config>
-  <Config Name="Admin password" Target="ADMIN_PASSWORD" Default="" Description="Initial administrator password (first run only; use 12-128 characters)" Type="Variable" Display="always-hide" Required="true" Mask="true"></Config>
+  <Config Name="Admin password" Target="ADMIN_PASSWORD" Default="bookvaultpassword" Description="Initial administrator password (first run only; change before first launch)" Type="Variable" Display="always-hide" Required="true" Mask="true">bookvaultpassword</Config>
 </Container>

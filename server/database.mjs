@@ -69,7 +69,7 @@ export function publicUser(user) {
 
 export async function ensureAdmin() {
   if (db.prepare("SELECT COUNT(*) AS count FROM users").get().count) return;
-  const name = String(process.env.ADMIN_NAME || "BookVault Admin").trim();
+  const name = String(process.env.ADMIN_NAME || "bookvaultadmin").trim();
   const email = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
   const password = process.env.ADMIN_PASSWORD || "";
   const problem = passwordError(password);

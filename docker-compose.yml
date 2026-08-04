@@ -12,7 +12,7 @@ services:
       TZ: America/New_York
       PORT: "8130"
       DATABASE_PATH: /config/book-vault.sqlite
-      ADMIN_NAME: BookVault Admin
+      ADMIN_NAME: bookvaultadmin
       ADMIN_EMAIL: "${ADMIN_EMAIL:?Set ADMIN_EMAIL in your environment}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in your environment}"
       SESSION_DAYS: "30"

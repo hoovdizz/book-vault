@@ -15,6 +15,6 @@ environment:
   TZ: America/New_York
   DATABASE_PATH: /config/book-vault.sqlite
   SESSION_DAYS: "30"
-  ADMIN_NAME: BookVault Admin
-  ADMIN_EMAIL: ""
-  ADMIN_PASSWORD: ""
+  ADMIN_NAME: bookvaultadmin
+  ADMIN_EMAIL: admin@bookvault.local
+  ADMIN_PASSWORD: bookvaultpassword
