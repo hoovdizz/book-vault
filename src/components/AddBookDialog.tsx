@@ -209,7 +209,7 @@ export default function AddBookDialog({
   const [results, setResults] = useState<BookSearchResult[]>([]);
   const [providers, setProviders] = useState<Providers | null>(null);
   const [searched, setSearched] = useState(false);
-  const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [draft, setDraft] = useState<Draft>({ ...emptyDraft, scope: isWishlist ? 'household' : 'personal' });
   const [scannerOpen, setScannerOpen] = useState(false);
   const [duplicateWarnings, setDuplicateWarnings] = useState<DuplicateWarning[]>([]);
   const [duplicateAction, setDuplicateAction] = useState('');
@@ -268,7 +268,7 @@ export default function AddBookDialog({
     setResults([]);
     setProviders(null);
     setSearched(false);
-    setDraft(withDefaults({ ...emptyDraft }));
+    setDraft(withDefaults({ ...emptyDraft, scope: isWishlist ? 'household' : 'personal' }));
     setScannerOpen(false);
     setDuplicateWarnings([]);
     setDuplicateAction('');
