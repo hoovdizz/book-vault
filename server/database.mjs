@@ -1,11 +1,19 @@
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import {
+  DATABASE_SCHEMA_VERSION,
+  ensureUserHousehold,
+  runMigrations,
+} from "./migrations.mjs";
+import { applyPendingRestore } from "./restore-startup.mjs";
 
 const scryptAsync = promisify(scrypt);
-const databasePath = process.env.DATABASE_PATH || "./data/book-vault.sqlite";
+export const databasePath = process.env.DATABASE_PATH || "./data/book-vault.sqlite";
+applyPendingRestore(databasePath);
+const databaseExisted = existsSync(databasePath);
 const MIN_PASSWORD_BYTES = 12;
 export const MAX_PASSWORD_BYTES = 128;
 
@@ -148,6 +156,11 @@ db.exec(`
   SELECT id, user_id, read_status FROM books
 `);
 
+export const migrationState = runMigrations({ db, databasePath, databaseExisted });
+if (migrationState.version !== DATABASE_SCHEMA_VERSION) {
+  throw new Error(`Database schema version ${migrationState.version} is not supported; expected ${DATABASE_SCHEMA_VERSION}`);
+}
+
 export function passwordError(password) {
   const bytes = Buffer.byteLength(String(password || ""), "utf8");
   if (bytes < MIN_PASSWORD_BYTES) return `Password must be at least ${MIN_PASSWORD_BYTES} characters`;
@@ -170,7 +183,15 @@ export async function verifyPassword(password, stored) {
 }
 
 export function publicUser(user) {
-  return user && { id: user.id, name: user.name, email: user.email, role: user.role, createdAt: user.created_at };
+  return user && {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    systemRole: user.system_role || (user.role === "admin" ? "system_admin" : "user"),
+    disabled: Boolean(user.disabled),
+    createdAt: user.created_at,
+  };
 }
 
 export async function ensureAdmin() {
@@ -182,7 +203,8 @@ export async function ensureAdmin() {
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || problem) {
     throw new Error(`A new database requires a valid ADMIN_EMAIL and ADMIN_PASSWORD. ${problem || ""}`.trim());
   }
-  db.prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'admin')")
+  const result = db.prepare("INSERT INTO users (name, email, password_hash, role, system_role) VALUES (?, ?, ?, 'admin', 'system_admin')")
     .run(name.slice(0, 100), email, await hashPassword(password));
+  ensureUserHousehold(db, Number(result.lastInsertRowid), name, { systemAdmin: true });
   console.log(`Created initial administrator: ${email}`);
 }

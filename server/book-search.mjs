@@ -252,6 +252,22 @@ export function mergeBookResults(googleResults, openLibraryResults, hardcoverRes
   }));
 }
 
+function mergeConfiguredResults(resultSets, providerOrder, hardcoverResults) {
+  const merged = [];
+  for (const provider of providerOrder) {
+    for (const candidate of resultSets[provider] || []) {
+      const index = merged.findIndex(existing => sameBook(existing, candidate));
+      if (index === -1) merged.push(candidate);
+      else merged[index] = mergeResult(merged[index], candidate);
+    }
+  }
+  for (const candidate of hardcoverResults) {
+    const index = merged.findIndex(existing => sameBook(existing, candidate));
+    if (index !== -1) merged[index] = mergeResult(merged[index], candidate);
+  }
+  return merged.slice(0, 12).map(result => ({ ...result, coverUrl: result.coverOptions[0]?.url }));
+}
+
 async function fetchJson(url, provider, timeoutMs, options = {}) {
   const response = await fetch(url, {
     headers: {
@@ -538,16 +554,40 @@ export async function lookupBooks(query, searchType = "auto", options = {}) {
     "key,title,author_name,isbn,first_publish_year,publisher,number_of_pages_median,cover_i,editions,series,subject,first_sentence",
   );
 
+  const enabledProviders = new Set(
+    Array.isArray(options.enabledProviders)
+      ? options.enabledProviders.filter(provider => ["google_books", "open_library"].includes(provider))
+      : ["google_books", "open_library"],
+  );
+  const providerOrder = [
+    ...new Set(
+      (Array.isArray(options.providerOrder) ? options.providerOrder : ["google_books", "open_library"])
+        .filter(provider => enabledProviders.has(provider)),
+    ),
+  ];
+  for (const provider of enabledProviders) {
+    if (!providerOrder.includes(provider)) providerOrder.push(provider);
+  }
   const hardcoverPromise = options.hardcoverToken
     ? lookupHardcoverBooks(type === "isbn" ? isbn : cleanQuery, options.hardcoverToken, timeoutMs)
     : Promise.resolve([]);
   const [google, openLibrary, hardcover] = await Promise.allSettled([
-    fetchJson(googleUrl, "Google Books", timeoutMs),
-    fetchJson(openLibraryUrl, "Open Library", timeoutMs),
+    enabledProviders.has("google_books")
+      ? fetchJson(googleUrl, "Google Books", timeoutMs)
+      : Promise.resolve({ items: [] }),
+    enabledProviders.has("open_library")
+      ? fetchJson(openLibraryUrl, "Open Library", timeoutMs)
+      : Promise.resolve({ docs: [] }),
     hardcoverPromise,
   ]);
-  if (google.status === "rejected" && openLibrary.status === "rejected") {
-    const error = new Error("Google Books and Open Library are temporarily unavailable");
+  const enabledFailures = [
+    enabledProviders.has("google_books") && google.status === "rejected",
+    enabledProviders.has("open_library") && openLibrary.status === "rejected",
+  ];
+  if (!enabledProviders.size || enabledFailures.filter(Boolean).length === enabledProviders.size) {
+    const error = new Error(enabledProviders.size
+      ? "Configured metadata providers are temporarily unavailable"
+      : "No metadata provider is enabled; use manual entry");
     error.status = 502;
     throw error;
   }
@@ -556,10 +596,14 @@ export async function lookupBooks(query, searchType = "auto", options = {}) {
   const openLibraryResults = openLibrary.status === "fulfilled" ? normalizeOpenLibraryDocs(openLibrary.value, isbn) : [];
   const hardcoverResults = hardcover.status === "fulfilled" ? hardcover.value : [];
   return {
-    results: mergeBookResults(googleResults, openLibraryResults, hardcoverResults),
+    results: mergeConfiguredResults(
+      { google_books: googleResults, open_library: openLibraryResults },
+      providerOrder,
+      hardcoverResults,
+    ),
     providers: {
-      googleBooks: google.status === "fulfilled" ? "available" : "unavailable",
-      openLibrary: openLibrary.status === "fulfilled" ? "available" : "unavailable",
+      googleBooks: !enabledProviders.has("google_books") ? "disabled" : google.status === "fulfilled" ? "available" : "unavailable",
+      openLibrary: !enabledProviders.has("open_library") ? "disabled" : openLibrary.status === "fulfilled" ? "available" : "unavailable",
       hardcover: options.hardcoverToken
         ? (hardcover.status === "fulfilled" ? "available" : "unavailable")
         : "disabled",

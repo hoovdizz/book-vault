@@ -11,7 +11,10 @@ export type BookCondition = 'new' | 'like_new' | 'good' | 'fair' | 'poor' | 'dam
 export interface Book {
   id: string;
   isbn?: string;
+  isbn10?: string;
+  isbn13?: string;
   title: string;
+  subtitle?: string;
   author: string;
   series?: string;
   seriesNumber?: string | number;
@@ -21,12 +24,15 @@ export interface Book {
   genre?: string;
   pageCount?: number;
   publishedYear?: number;
+  publicationDate?: string;
   publisher?: string;
   description?: string;
   binding?: BookBinding;
   edition?: string;
   source?: BookSource;
   sourceId?: string;
+  language?: string;
+  readingOrder?: number;
 }
 
 export interface BookSearchResult extends Omit<Book, 'id'> {
@@ -41,10 +47,14 @@ export type BookFormat = 'physical' | 'ebook' | 'audiobook';
 
 export interface UserBook {
   id: string;
+  kind?: 'copy' | 'list';
   bookId: string;
+  workId?: string;
+  editionId?: string | null;
+  copyId?: string | null;
   book: Book;
   status: 'owned' | 'wishlist' | 'backlog';
-  readStatus: 'read' | 'unread' | 'reading';
+  readStatus: 'unread' | 'want_to_read' | 'reading' | 'paused' | 'did_not_finish' | 'read' | 'reference' | 'abandoned' | string;
   formats: BookFormat[];
   conditionGrade?: BookCondition;
   conditionNotes?: string;
@@ -55,7 +65,11 @@ export interface UserBook {
   shared?: boolean;
   canDelete?: boolean;
   rating?: number;
-  purchasePrice?: number;
+  purchaseDate?: string | null;
+  purchasePrice?: number | null;
+  purchaseCurrency?: string | null;
+  purchaseSource?: string | null;
+  customBarcode?: string | null;
   storageLocation?: string;
   notes?: string;
   tags?: string[];
@@ -63,6 +77,46 @@ export interface UserBook {
   sortOrder?: number;
   dateAdded: string;
   dateRead?: string;
+  location?: {
+    id: string;
+    name: string;
+    breadcrumb: string;
+    levelType: string;
+  } | null;
+  activeLoan?: {
+    id: string;
+    checkoutAt: string;
+    dueAt: string | null;
+    status: string;
+    borrower: string;
+    overdue: boolean;
+  } | null;
+  counts?: {
+    editions: number;
+    editionCopies: number;
+    workCopies: number;
+  };
+  list?: {
+    scope: 'personal' | 'household';
+    priority: 'low' | 'medium' | 'high' | null;
+    expectedPrice: number | null;
+    expectedCurrency: string | null;
+    giftPrivate: boolean;
+    intendedRecipientId: string | null;
+    purchaseState: string;
+    desiredEdition: string | null;
+    notes: string;
+  } | null;
+}
+
+export interface CatalogResponse {
+  items: UserBook[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
 export interface Series {

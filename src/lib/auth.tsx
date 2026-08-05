@@ -1,6 +1,14 @@
 import { createContext, useContext, useEffect, useState } from "react";
 
-export type User = { id: number; name: string; email: string; role: "admin" | "user"; createdAt: string };
+export type User = {
+  id: number;
+  name: string;
+  email: string;
+  role: "admin" | "user";
+  systemRole?: "system_admin" | "user";
+  disabled?: boolean;
+  createdAt: string;
+};
 type AuthContextValue = { user: User | null; loading: boolean; login: (email: string, password: string) => Promise<void>; logout: () => Promise<void> };
 const AuthContext = createContext<AuthContextValue | null>(null);
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {

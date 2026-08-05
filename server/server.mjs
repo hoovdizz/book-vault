@@ -1,9 +1,98 @@
 import { createServer } from "node:http";
+import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, relative, isAbsolute, resolve } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { db, ensureAdmin, hashPassword, MAX_PASSWORD_BYTES, passwordError, publicUser, verifyPassword } from "./database.mjs";
-import { isAllowedCoverUrl, lookupBooks, lookupSeries, normalizeCoverUrl, normalizeIsbn } from "./book-search.mjs";
+import { ensureUserHousehold } from "./migrations.mjs";
+import {
+  assertActiveContext,
+  assertHouseholdAdmin,
+  householdContext,
+  householdMembers,
+  householdSummary,
+  isSystemAdmin,
+  validatedHouseholdRole,
+  writeAuditEvent,
+} from "./households.mjs";
+import {
+  assertLocationInHousehold,
+  assertValidLocationParent,
+  locationInventory,
+  validatedLocationInput,
+} from "./locations.mjs";
+import {
+  archiveCatalogItem,
+  catalogItemDetail,
+  catalogActivity,
+  catalogStats,
+  createCatalogItem,
+  duplicateCopyGroups,
+  duplicateWarnings,
+  listCatalog,
+  moveCopies,
+  seriesInventory,
+  updateCatalogItem,
+} from "./catalog.mjs";
+import {
+  batchCheckIn,
+  cancelHold,
+  checkoutCopy,
+  createHold,
+  listHolds,
+  listLoans,
+  markLoan,
+  renewLoan,
+  returnLoan,
+} from "./loans.mjs";
+import {
+  createReadingSession,
+  householdReadingStatistics,
+  readingDetail,
+  readingStatistics,
+  updateReadingPreferences,
+  updateReadingSession,
+  updateReadingState,
+} from "./reading.mjs";
+import { cacheExternalCover, MAX_COVER_BYTES, readCover, uploadCover } from "./covers.mjs";
+import {
+  configuredLookup,
+  metadataQuality,
+  providerSettings,
+  refreshEditionMetadata,
+  updateProviderSettings,
+} from "./metadata.mjs";
+import {
+  adminStatus,
+  backupPath,
+  createBackup,
+  integrityCheck,
+  listBackups,
+  previewRestore,
+  runScheduledBackups,
+  stageRestore,
+} from "./maintenance.mjs";
+import {
+  commitImport,
+  exportCatalogCsv,
+  exportHouseholdJson,
+  exportLoansCsv,
+  exportUserReadingJson,
+  importPresets,
+  previewImport,
+} from "./data-transfer.mjs";
+import {
+  createCollection,
+  createCustomField,
+  deleteCollection,
+  listCollections,
+  listCustomFields,
+  setCustomFieldValue,
+  updateCollection,
+  updateUserPreferences,
+  userPreferences,
+} from "./organization.mjs";
+import { isAllowedCoverUrl, lookupSeries, normalizeCoverUrl, normalizeIsbn } from "./book-search.mjs";
 
 const port = Number(process.env.PORT || 8130);
 const host = process.env.HOST || "0.0.0.0";
@@ -12,17 +101,81 @@ const sessionDays = Math.min(90, Math.max(1, Number(process.env.SESSION_DAYS || 
 const sessionCookie = "bookvault_session";
 const maxBodyBytes = 16_384;
 const maxBulkBodyBytes = 1024 * 1024;
+const maxImportBodyBytes = 10 * 1024 * 1024 + 64 * 1024;
 const loginWindowMs = 15 * 60 * 1000;
 const loginLimit = 5;
 const loginAttempts = new Map();
 const bookLookupLimit = 30;
 const bookLookupWindowMs = 5 * 60 * 1000;
 const bookLookupAttempts = new Map();
-const bookLookupCache = new Map();
+const legacyApiEnabled = process.env.ENABLE_LEGACY_API === "true";
+const trustProxy = process.env.TRUST_PROXY === "true";
 const allowedBindings = new Set(["hardcover", "paperback", "mass_market_paperback", "library_binding", "spiral_bound", "other"]);
 const allowedConditions = new Set(["new", "like_new", "good", "fair", "poor", "damaged"]);
 const allowedReadStatuses = new Set(["read", "unread", "reading"]);
-const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".png": "image/png" };
+const mime = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".png": "image/png",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+};
+
+async function runMetadataJob(jobId, context, jobType, editionIds) {
+  db.prepare(`
+    UPDATE background_jobs SET status = 'running', started_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(jobId);
+  let completed = 0;
+  const failures = [];
+  try {
+    for (const editionId of editionIds) {
+      try {
+        await refreshEditionMetadata(db, context, editionId, {
+          googleApiKey: process.env.GOOGLE_BOOKS_API_KEY,
+          hardcoverToken: process.env.HARDCOVER_API_TOKEN,
+          timeoutMs: process.env.BOOK_LOOKUP_TIMEOUT_MS,
+        });
+        if (jobType === "cover_backfill") {
+          const edition = db.prepare(`
+            SELECT cover_url, cover_path FROM editions
+            WHERE id = ? AND household_id = ?
+          `).get(editionId, context.household_id);
+          if (edition?.cover_url && !edition.cover_path) {
+            await cacheExternalCover(db, context.household_id, editionId, edition.cover_url);
+          }
+        }
+      } catch (error) {
+        failures.push({ editionId: String(editionId), error: String(error?.message || error).slice(0, 300) });
+      }
+      completed += 1;
+      db.prepare(`
+        UPDATE background_jobs SET progress = ?, details = ? WHERE id = ?
+      `).run(
+        editionIds.length ? completed / editionIds.length : 1,
+        JSON.stringify({ total: editionIds.length, completed, failures: failures.slice(-25) }),
+        jobId,
+      );
+    }
+    const failedCompletely = editionIds.length > 0 && failures.length === editionIds.length;
+    db.prepare(`
+      UPDATE background_jobs SET status = ?, progress = 1, error_message = ?,
+        completed_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).run(
+      failedCompletely ? "failed" : "completed",
+      failures.length ? `${failures.length} of ${editionIds.length} records failed; see job details` : null,
+      jobId,
+    );
+  } catch (error) {
+    db.prepare(`
+      UPDATE background_jobs SET status = 'failed', error_message = ?,
+        completed_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).run(String(error?.message || error).slice(0, 1000), jobId);
+  }
+}
 const securityHeaders = {
   "Content-Security-Policy": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob: https://images.unsplash.com https://books.google.com https://books.googleusercontent.com https://covers.openlibrary.org https://assets.hardcover.app; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'",
   "Referrer-Policy": "no-referrer",
@@ -56,6 +209,19 @@ async function jsonBody(req, limit = maxBodyBytes) {
   try { return raw ? JSON.parse(raw) : {}; } catch {
     const error = new Error("Invalid JSON"); error.status = 400; throw error;
   }
+}
+async function binaryBody(req, limit) {
+  const declaredLength = Number(req.headers["content-length"] || 0);
+  if (declaredLength > limit) throw Object.assign(new Error("Request too large"), { status: 413 });
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw Object.assign(new Error("Request too large"), { status: 413 });
+    chunks.push(chunk);
+  }
+  if (!size) throw Object.assign(new Error("Image upload is empty"), { status: 400 });
+  return Buffer.concat(chunks);
 }
 function tokenHash(token) {
   return createHash("sha256").update(token).digest("hex");
@@ -92,7 +258,7 @@ function failedLogin(keys) {
   }
 }
 function cookieHeader(req, token, maxAge) {
-  const secure = req.socket.encrypted || req.headers["x-forwarded-proto"] === "https";
+  const secure = req.socket.encrypted || (trustProxy && req.headers["x-forwarded-proto"] === "https");
   return `${sessionCookie}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
 }
 function validEmail(email) {
@@ -242,6 +408,19 @@ function validatedBook(input) {
     conditionGrade, conditionNotes: conditionNotes || null,
     loanedOut, loanedTo: loanedOut ? loanedTo || null : null,
     loanedAt: loanedOut ? rawLoanedAt || null : null,
+  };
+}
+
+function validatedCatalogInput(input) {
+  const book = validatedBook(input);
+  return {
+    ...input,
+    ...book,
+    readStatus: input.readStatus == null ? book.readStatus : String(input.readStatus),
+    publicationDate: input.publicationDate,
+    readingOrder: input.readingOrder,
+    seriesRole: input.seriesRole,
+    includedVolumes: input.includedVolumes,
   };
 }
 
@@ -468,7 +647,7 @@ async function api(req, res, url) {
     }
     const user = db.prepare("SELECT * FROM users WHERE email = ? COLLATE NOCASE").get(email);
     const validPassword = await verifyPassword(password, user?.password_hash || dummyPasswordHash);
-    const valid = Boolean(user && validPassword);
+    const valid = Boolean(user && !user.disabled && validPassword);
     if (!valid) {
       failedLogin(keys); audit("login_failed", req, { email }); return send(res, 401, { error: "Invalid email or password" });
     }
@@ -479,13 +658,960 @@ async function api(req, res, url) {
     audit("login_succeeded", req, { userId: user.id });
     return send(res, 200, { user: publicUser(user) }, { "Set-Cookie": cookieHeader(req, token, sessionDays * 86400) });
   }
+  if (req.method === "POST" && url.pathname === "/api/invitations/accept") {
+    const input = await jsonBody(req);
+    const invitationToken = String(input.token || "");
+    const name = boundedText(input.name, 100, true);
+    const password = String(input.password || "");
+    const problem = passwordError(password);
+    if (!/^[a-f0-9]{64}$/.test(invitationToken) || !name || problem) {
+      return send(res, 400, { error: problem || "A valid invitation, name, and password are required" });
+    }
+    const invitation = db.prepare(`
+      SELECT * FROM household_invitations
+      WHERE token_hash = ? AND accepted_at IS NULL AND revoked_at IS NULL
+        AND expires_at > CURRENT_TIMESTAMP
+    `).get(tokenHash(invitationToken));
+    if (!invitation) return send(res, 400, { error: "This invitation is invalid or has expired" });
+    if (db.prepare("SELECT id FROM users WHERE email = ? COLLATE NOCASE").get(invitation.email)) {
+      return send(res, 409, { error: "An account with this email already exists; ask an administrator to add that account" });
+    }
+    const passwordHash = await hashPassword(password);
+    let userId;
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      const result = db.prepare(`
+        INSERT INTO users (name, email, password_hash, role, system_role)
+        VALUES (?, ?, ?, 'user', 'user')
+      `).run(name, invitation.email, passwordHash);
+      userId = Number(result.lastInsertRowid);
+      db.prepare(`
+        INSERT INTO household_members (household_id, user_id, household_role)
+        VALUES (?, ?, ?)
+      `).run(invitation.household_id, userId, invitation.household_role);
+      db.prepare("UPDATE household_invitations SET accepted_at = CURRENT_TIMESTAMP WHERE id = ?").run(invitation.id);
+      db.exec("COMMIT");
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch {}
+      throw error;
+    }
+    writeAuditEvent(db, {
+      householdId: invitation.household_id,
+      actorUserId: userId,
+      eventType: "invitation_accepted",
+      targetType: "user",
+      targetId: userId,
+      address: clientAddress(req),
+    });
+    return send(res, 201, { ok: true });
+  }
   const user = currentUser(req);
   if (!user) return send(res, 401, { error: "Authentication required" });
-  if (req.method === "GET" && url.pathname === "/api/auth/me") return send(res, 200, { user: publicUser(user) });
+  const userHousehold = assertActiveContext(householdContext(db, user.id));
+  if (!legacyApiEnabled && (
+    url.pathname === "/api/settings"
+    || url.pathname === "/api/family"
+    || /^\/api\/books(?:\/|$)/.test(url.pathname)
+  )) {
+    return send(res, 410, {
+      error: "This legacy endpoint is disabled. Use the normalized household, catalog, loan, and reading APIs.",
+    });
+  }
+  const coverMatch = url.pathname.match(/^\/api\/covers\/([1-9]\d*)$/);
+  if (coverMatch && req.method === "GET") {
+    const cover = await readCover(db, userHousehold, Number(coverMatch[1]));
+    writeHead(res, 200, {
+      "Content-Type": cover.mime,
+      "Content-Length": String(cover.buffer.length),
+      "Cache-Control": "private, max-age=86400",
+      ETag: cover.etag,
+    });
+    return res.end(cover.buffer);
+  }
+  if (coverMatch && req.method === "PUT") {
+    const result = await uploadCover(
+      db,
+      userHousehold,
+      Number(coverMatch[1]),
+      await binaryBody(req, MAX_COVER_BYTES),
+    );
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "edition_cover_uploaded",
+      targetType: "edition",
+      targetId: coverMatch[1],
+      address: clientAddress(req),
+      details: { size: result.size, mime: result.mime },
+    });
+    return send(res, 200, { cover: result });
+  }
+  if (req.method === "GET" && url.pathname === "/api/auth/me") {
+    return send(res, 200, { user: publicUser(user), household: householdSummary(db, userHousehold) });
+  }
   if (req.method === "POST" && url.pathname === "/api/auth/logout") {
     db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(user.token_hash);
     audit("logout", req, { userId: user.id });
     return send(res, 200, { ok: true }, { "Set-Cookie": cookieHeader(req, "", 0) });
+  }
+  if (url.pathname === "/api/household") {
+    if (req.method === "GET") {
+      return send(res, 200, {
+        household: householdSummary(db, userHousehold),
+        members: householdMembers(db, userHousehold.household_id),
+        permissions: {
+          manageHousehold: userHousehold.system_role === "system_admin" || userHousehold.household_role === "household_admin",
+          editInventory: ["system_admin"].includes(userHousehold.system_role)
+            || ["household_admin", "adult"].includes(userHousehold.household_role),
+          editReading: userHousehold.household_role !== "viewer",
+        },
+      });
+    }
+    if (req.method === "PUT") {
+      assertHouseholdAdmin(userHousehold);
+      const input = await jsonBody(req);
+      const name = boundedText(input.name, 100, true);
+      const defaultBinding = input.defaultBinding === "" || input.defaultBinding == null ? null : input.defaultBinding;
+      const defaultCondition = input.defaultCondition === "" || input.defaultCondition == null ? null : input.defaultCondition;
+      const defaultLocationId = input.defaultLocationId === "" || input.defaultLocationId == null ? null : Number(input.defaultLocationId);
+      const ratingScale = ["stars5", "points10"].includes(input.ratingScale) ? input.ratingScale : "stars5";
+      const allowedIncrements = ratingScale === "points10" ? [1] : [0.25, 0.5, 1];
+      const ratingIncrement = Number(input.ratingIncrement);
+      const backupRetention = Number(input.backupRetention ?? userHousehold.backup_retention);
+      const backupSchedule = boundedText(input.backupSchedule, 100);
+      if (!name || (defaultBinding && !allowedBindings.has(defaultBinding)) || (defaultCondition && !allowedConditions.has(defaultCondition))) {
+        return send(res, 400, { error: "One or more household defaults are invalid" });
+      }
+      if (defaultLocationId !== null) {
+        if (!Number.isSafeInteger(defaultLocationId)
+          || !db.prepare("SELECT id FROM locations WHERE id = ? AND household_id = ?").get(defaultLocationId, userHousehold.household_id)) {
+          return send(res, 400, { error: "Default location must belong to this household" });
+        }
+      }
+      if (!allowedIncrements.includes(ratingIncrement)) return send(res, 400, { error: "Invalid rating increment for this scale" });
+      if (!Number.isInteger(backupRetention) || backupRetention < 1 || backupRetention > 365 || backupSchedule === null) {
+        return send(res, 400, { error: "Invalid backup retention or schedule" });
+      }
+      db.prepare(`
+        UPDATE households SET
+          name = ?, default_location_id = ?, default_binding = ?, default_condition = ?,
+          rating_scale = ?, rating_increment = ?, backup_retention = ?,
+          scheduled_backup = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(
+        name,
+        defaultLocationId,
+        defaultBinding,
+        defaultCondition,
+        ratingScale,
+        ratingIncrement,
+        backupRetention,
+        backupSchedule || null,
+        userHousehold.household_id,
+      );
+      writeAuditEvent(db, {
+        householdId: userHousehold.household_id,
+        actorUserId: user.id,
+        eventType: "household_settings_updated",
+        targetType: "household",
+        targetId: userHousehold.household_id,
+        address: clientAddress(req),
+      });
+      return send(res, 200, { household: householdSummary(db, householdContext(db, user.id)) });
+    }
+  }
+  if (url.pathname === "/api/household/members" && req.method === "POST") {
+    assertHouseholdAdmin(userHousehold);
+    const input = await jsonBody(req);
+    const name = boundedText(input.name, 100, true);
+    const email = String(input.email || "").trim().toLocaleLowerCase();
+    const password = String(input.password || "");
+    const householdRole = validatedHouseholdRole(input.householdRole);
+    const problem = passwordError(password);
+    if (!name || !validEmail(email) || problem || !householdRole) {
+      return send(res, 400, { error: problem || "A valid name, email, password, and household role are required" });
+    }
+    const passwordHash = await hashPassword(password);
+    try {
+      let userId;
+      db.exec("BEGIN IMMEDIATE");
+      const result = db.prepare(`
+        INSERT INTO users (name, email, password_hash, role, system_role)
+        VALUES (?, ?, ?, 'user', 'user')
+      `).run(name, email, passwordHash);
+      userId = Number(result.lastInsertRowid);
+      db.prepare(`
+        INSERT INTO household_members (household_id, user_id, household_role)
+        VALUES (?, ?, ?)
+      `).run(userHousehold.household_id, userId, householdRole);
+      db.exec("COMMIT");
+      writeAuditEvent(db, {
+        householdId: userHousehold.household_id,
+        actorUserId: user.id,
+        eventType: householdRole === "child" ? "child_profile_created" : "household_member_created",
+        targetType: "user",
+        targetId: userId,
+        address: clientAddress(req),
+        details: { householdRole },
+      });
+      return send(res, 201, { members: householdMembers(db, userHousehold.household_id) });
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch {}
+      if (String(error).includes("UNIQUE")) return send(res, 409, { error: "That email already exists" });
+      throw error;
+    }
+  }
+  const householdMemberMatch = url.pathname.match(/^\/api\/household\/members\/([1-9]\d*)$/);
+  if (householdMemberMatch && req.method === "PATCH") {
+    assertHouseholdAdmin(userHousehold);
+    const targetUserId = Number(householdMemberMatch[1]);
+    const target = db.prepare(`
+      SELECT u.system_role, hm.* FROM household_members hm
+      JOIN users u ON u.id = hm.user_id
+      WHERE hm.household_id = ? AND hm.user_id = ?
+    `).get(userHousehold.household_id, targetUserId);
+    if (!target) return send(res, 404, { error: "Household member not found" });
+    const input = await jsonBody(req);
+    const role = input.householdRole == null ? target.household_role : validatedHouseholdRole(input.householdRole);
+    const disabled = input.disabled == null ? Boolean(target.disabled) : input.disabled === true;
+    if (!role) return send(res, 400, { error: "Invalid household role" });
+    if (targetUserId === user.id && (disabled || role !== "household_admin")) {
+      return send(res, 400, { error: "You cannot disable or demote your own administrator account" });
+    }
+    if (target.system_role === "system_admin" && userHousehold.system_role !== "system_admin") {
+      return send(res, 403, { error: "Only a system administrator can change another system administrator" });
+    }
+    if (target.household_role === "household_admin" && (role !== "household_admin" || disabled)) {
+      const activeAdmins = db.prepare(`
+        SELECT COUNT(*) AS count FROM household_members
+        WHERE household_id = ? AND household_role = 'household_admin' AND disabled = 0
+      `).get(userHousehold.household_id).count;
+      if (activeAdmins <= 1) return send(res, 400, { error: "A household must retain at least one active administrator" });
+    }
+    db.prepare(`
+      UPDATE household_members SET household_role = ?, disabled = ?
+      WHERE household_id = ? AND user_id = ?
+    `).run(role, disabled ? 1 : 0, userHousehold.household_id, targetUserId);
+    if (disabled) db.prepare("DELETE FROM sessions WHERE user_id = ?").run(targetUserId);
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: disabled ? "household_member_disabled" : "household_member_updated",
+      targetType: "user",
+      targetId: targetUserId,
+      address: clientAddress(req),
+      details: { householdRole: role, disabled },
+    });
+    return send(res, 200, { members: householdMembers(db, userHousehold.household_id) });
+  }
+  const memberPasswordMatch = url.pathname.match(/^\/api\/household\/members\/([1-9]\d*)\/password$/);
+  if (memberPasswordMatch && req.method === "PUT") {
+    assertHouseholdAdmin(userHousehold);
+    const targetUserId = Number(memberPasswordMatch[1]);
+    if (!db.prepare(`
+      SELECT 1 FROM household_members WHERE household_id = ? AND user_id = ?
+    `).get(userHousehold.household_id, targetUserId)) {
+      return send(res, 404, { error: "Household member not found" });
+    }
+    const { password } = await jsonBody(req);
+    const problem = passwordError(password);
+    if (problem) return send(res, 400, { error: problem });
+    db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(await hashPassword(password), targetUserId);
+    db.prepare("DELETE FROM sessions WHERE user_id = ?").run(targetUserId);
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "household_member_credentials_reset",
+      targetType: "user",
+      targetId: targetUserId,
+      address: clientAddress(req),
+    });
+    return send(res, 200, { ok: true });
+  }
+  if (url.pathname === "/api/household/invitations") {
+    assertHouseholdAdmin(userHousehold);
+    if (req.method === "GET") {
+      const invitations = db.prepare(`
+        SELECT id, email, household_role, expires_at, accepted_at, revoked_at, created_at
+        FROM household_invitations
+        WHERE household_id = ?
+        ORDER BY created_at DESC
+      `).all(userHousehold.household_id).map(invitation => ({
+        id: String(invitation.id),
+        email: invitation.email,
+        householdRole: invitation.household_role,
+        expiresAt: invitation.expires_at,
+        acceptedAt: invitation.accepted_at || null,
+        revokedAt: invitation.revoked_at || null,
+        createdAt: invitation.created_at,
+      }));
+      return send(res, 200, { invitations });
+    }
+    if (req.method === "POST") {
+      const input = await jsonBody(req);
+      const email = String(input.email || "").trim().toLocaleLowerCase();
+      const householdRole = validatedHouseholdRole(input.householdRole);
+      const expiresInDays = Math.min(30, Math.max(1, Number(input.expiresInDays || 7)));
+      if (!validEmail(email) || !householdRole || !Number.isInteger(expiresInDays)) {
+        return send(res, 400, { error: "A valid email, role, and expiration are required" });
+      }
+      if (db.prepare("SELECT id FROM users WHERE email = ? COLLATE NOCASE").get(email)) {
+        return send(res, 409, { error: "That email already has an account" });
+      }
+      const invitationToken = randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + expiresInDays * 86400000).toISOString();
+      const result = db.prepare(`
+        INSERT INTO household_invitations (
+          household_id, email, household_role, token_hash, invited_by, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        userHousehold.household_id,
+        email,
+        householdRole,
+        tokenHash(invitationToken),
+        user.id,
+        expiresAt,
+      );
+      writeAuditEvent(db, {
+        householdId: userHousehold.household_id,
+        actorUserId: user.id,
+        eventType: "household_invitation_created",
+        targetType: "invitation",
+        targetId: Number(result.lastInsertRowid),
+        address: clientAddress(req),
+        details: { email, householdRole, expiresAt },
+      });
+      return send(res, 201, {
+        invitation: {
+          id: String(result.lastInsertRowid),
+          email,
+          householdRole,
+          expiresAt,
+          token: invitationToken,
+        },
+      });
+    }
+  }
+  const invitationMatch = url.pathname.match(/^\/api\/household\/invitations\/([1-9]\d*)$/);
+  if (invitationMatch && req.method === "DELETE") {
+    assertHouseholdAdmin(userHousehold);
+    const result = db.prepare(`
+      UPDATE household_invitations SET revoked_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND household_id = ? AND accepted_at IS NULL
+    `).run(Number(invitationMatch[1]), userHousehold.household_id);
+    if (!result.changes) return send(res, 404, { error: "Active invitation not found" });
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "household_invitation_revoked",
+      targetType: "invitation",
+      targetId: invitationMatch[1],
+      address: clientAddress(req),
+    });
+    return send(res, 200, { ok: true });
+  }
+  if (url.pathname === "/api/household/reading-statuses") {
+    if (req.method === "GET") {
+      const statuses = db.prepare(`
+        SELECT status_key, label, sort_order, enabled
+        FROM household_reading_statuses
+        WHERE household_id = ?
+        ORDER BY sort_order, status_key
+      `).all(userHousehold.household_id).map(status => ({
+        key: status.status_key,
+        label: status.label,
+        sortOrder: status.sort_order,
+        enabled: Boolean(status.enabled),
+      }));
+      return send(res, 200, { statuses });
+    }
+    if (req.method === "PUT") {
+      assertHouseholdAdmin(userHousehold);
+      const { statuses } = await jsonBody(req);
+      if (!Array.isArray(statuses) || !statuses.length || statuses.length > 30) {
+        return send(res, 400, { error: "Provide between 1 and 30 reading statuses" });
+      }
+      const normalized = statuses.map((status, index) => ({
+        key: String(status.key || "").trim().toLocaleLowerCase(),
+        label: boundedText(status.label, 50, true),
+        enabled: status.enabled !== false,
+        sortOrder: Number.isInteger(status.sortOrder) ? status.sortOrder : index,
+      }));
+      if (normalized.some(status => !/^[a-z][a-z0-9_]{0,39}$/.test(status.key) || !status.label)
+        || new Set(normalized.map(status => status.key)).size !== normalized.length
+        || !normalized.some(status => status.key === "unread" && status.enabled)
+        || !normalized.some(status => status.key === "read" && status.enabled)) {
+        return send(res, 400, { error: "Reading statuses need unique keys and enabled Unread and Read choices" });
+      }
+      try {
+        db.exec("BEGIN IMMEDIATE");
+        db.prepare("UPDATE household_reading_statuses SET enabled = 0 WHERE household_id = ?").run(userHousehold.household_id);
+        const upsert = db.prepare(`
+          INSERT INTO household_reading_statuses (
+            household_id, status_key, label, sort_order, enabled
+          ) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(household_id, status_key) DO UPDATE SET
+            label = excluded.label,
+            sort_order = excluded.sort_order,
+            enabled = excluded.enabled
+        `);
+        for (const status of normalized) {
+          upsert.run(userHousehold.household_id, status.key, status.label, status.sortOrder, status.enabled ? 1 : 0);
+        }
+        db.exec("COMMIT");
+      } catch (error) {
+        try { db.exec("ROLLBACK"); } catch {}
+        throw error;
+      }
+      writeAuditEvent(db, {
+        householdId: userHousehold.household_id,
+        actorUserId: user.id,
+        eventType: "reading_statuses_updated",
+        targetType: "household",
+        targetId: userHousehold.household_id,
+        address: clientAddress(req),
+        details: { statusCount: normalized.length },
+      });
+      return send(res, 200, { ok: true });
+    }
+  }
+  if (url.pathname === "/api/metadata/providers") {
+    if (req.method === "GET") return send(res, 200, providerSettings(db, userHousehold.household_id));
+    if (req.method === "PUT") {
+      const providers = updateProviderSettings(db, userHousehold, await jsonBody(req));
+      writeAuditEvent(db, {
+        householdId: userHousehold.household_id,
+        actorUserId: user.id,
+        eventType: "metadata_providers_updated",
+        targetType: "household",
+        targetId: userHousehold.household_id,
+        address: clientAddress(req),
+        details: { order: providers.lookupOrder },
+      });
+      return send(res, 200, providers);
+    }
+  }
+  if (url.pathname === "/api/metadata/quality" && req.method === "GET") {
+    return send(res, 200, metadataQuality(db, userHousehold));
+  }
+  const metadataRefreshMatch = url.pathname.match(/^\/api\/metadata\/editions\/([1-9]\d*)\/refresh$/);
+  if (metadataRefreshMatch && req.method === "POST") {
+    const result = await refreshEditionMetadata(
+      db,
+      userHousehold,
+      Number(metadataRefreshMatch[1]),
+      {
+        googleApiKey: process.env.GOOGLE_BOOKS_API_KEY,
+        hardcoverToken: process.env.HARDCOVER_API_TOKEN,
+        timeoutMs: process.env.BOOK_LOOKUP_TIMEOUT_MS,
+      },
+    );
+    let coverCache = null;
+    if (result.coverUrl) {
+      try {
+        coverCache = await cacheExternalCover(
+          db,
+          userHousehold.household_id,
+          Number(metadataRefreshMatch[1]),
+          result.coverUrl,
+        );
+      } catch (error) {
+        coverCache = { status: "failed", error: error.message || "Cover caching failed" };
+      }
+    }
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "edition_metadata_refreshed",
+      targetType: "edition",
+      targetId: metadataRefreshMatch[1],
+      address: clientAddress(req),
+      details: { changedFields: result.changedFields || [], coverCached: Boolean(coverCache?.url) },
+    });
+    return send(res, 200, { ...result, coverCache });
+  }
+  if (url.pathname === "/api/metadata/jobs" && req.method === "POST") {
+    assertHouseholdAdmin(userHousehold);
+    const input = await jsonBody(req);
+    const jobType = ["metadata_refresh", "cover_backfill"].includes(input.jobType) ? input.jobType : null;
+    const limit = Math.min(1000, Math.max(1, Number(input.limit || 100)));
+    if (!jobType || !Number.isInteger(limit)) return send(res, 400, { error: "Invalid metadata job" });
+    const editionIds = db.prepare(`
+      SELECT edition.id
+      FROM editions edition JOIN works work ON work.id = edition.work_id
+      WHERE edition.household_id = ? AND edition.archived_at IS NULL
+        AND (
+          ? = 'metadata_refresh'
+          OR (? = 'cover_backfill' AND edition.cover_path IS NULL)
+        )
+        AND (
+          (edition.isbn10 IS NULL AND edition.isbn13 IS NULL)
+          OR edition.publisher IS NULL OR edition.publication_date IS NULL
+          OR edition.page_count IS NULL OR edition.cover_url IS NULL
+          OR work.primary_author = ''
+        )
+      ORDER BY COALESCE(edition.last_refresh_at, '0000-00-00'), edition.id
+      LIMIT ?
+    `).all(userHousehold.household_id, jobType, jobType, limit).map(row => Number(row.id));
+    const result = db.prepare(`
+      INSERT INTO background_jobs (household_id, job_type, status, details)
+      VALUES (?, ?, 'queued', ?)
+    `).run(
+      userHousehold.household_id,
+      jobType,
+      JSON.stringify({ total: editionIds.length, completed: 0, failures: [] }),
+    );
+    const jobId = Number(result.lastInsertRowid);
+    const jobContext = { ...userHousehold };
+    setImmediate(() => void runMetadataJob(jobId, jobContext, jobType, editionIds));
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "metadata_job_queued",
+      targetType: "background_job",
+      targetId: jobId,
+      address: clientAddress(req),
+      details: { jobType, recordCount: editionIds.length },
+    });
+    return send(res, 202, { job: { id: String(jobId), type: jobType, records: editionIds.length } });
+  }
+  if (url.pathname === "/api/admin/status" && req.method === "GET") {
+    return send(res, 200, await adminStatus(db, userHousehold));
+  }
+  if (url.pathname === "/api/admin/households" && req.method === "GET") {
+    if (!isSystemAdmin(userHousehold)) return send(res, 403, { error: "System administrator access required" });
+    const households = db.prepare(`
+      SELECT household.id, household.name, household.created_at,
+        (SELECT COUNT(*) FROM household_members member
+          WHERE member.household_id = household.id AND member.disabled = 0) AS members,
+        (SELECT COUNT(*) FROM works work
+          WHERE work.household_id = household.id AND work.archived_at IS NULL) AS works,
+        (SELECT COUNT(*) FROM copies copy
+          WHERE copy.household_id = household.id AND copy.archived_at IS NULL) AS copies
+      FROM households household ORDER BY household.name COLLATE NOCASE
+    `).all().map(household => ({
+      id: String(household.id),
+      name: household.name,
+      members: household.members,
+      works: household.works,
+      copies: household.copies,
+      createdAt: household.created_at,
+    }));
+    return send(res, 200, { households });
+  }
+  if (url.pathname === "/api/admin/integrity" && req.method === "POST") {
+    assertHouseholdAdmin(userHousehold);
+    const result = await integrityCheck(db);
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "database_integrity_checked",
+      targetType: "database",
+      address: clientAddress(req),
+      details: { status: result.status },
+    });
+    return send(res, result.status === "ok" ? 200 : 500, result);
+  }
+  if (url.pathname === "/api/admin/backups") {
+    if (req.method === "GET") return send(res, 200, listBackups(db, userHousehold));
+    if (req.method === "POST") {
+      const backup = await createBackup(db, userHousehold, user.id, "manual");
+      writeAuditEvent(db, {
+        householdId: userHousehold.household_id,
+        actorUserId: user.id,
+        eventType: "backup_created",
+        targetType: "backup",
+        targetId: backup.id,
+        address: clientAddress(req),
+        details: { size: backup.size, integrity: backup.integrity },
+      });
+      return send(res, 201, { backup });
+    }
+  }
+  const backupDownloadMatch = url.pathname.match(/^\/api\/admin\/backups\/([1-9]\d*)\/download$/);
+  if (backupDownloadMatch && req.method === "GET") {
+    const backup = backupPath(db, userHousehold, Number(backupDownloadMatch[1]));
+    writeHead(res, 200, {
+      "Content-Type": "application/x-tar",
+      "Content-Length": String(backup.size),
+      "Content-Disposition": `attachment; filename="${backup.filename.replaceAll('"', "")}"`,
+      "Cache-Control": "no-store",
+    });
+    return createReadStream(backup.path).pipe(res);
+  }
+  const backupPreviewMatch = url.pathname.match(/^\/api\/admin\/backups\/([1-9]\d*)\/restore-preview$/);
+  if (backupPreviewMatch && req.method === "POST") {
+    return send(res, 200, {
+      preview: await previewRestore(db, userHousehold, Number(backupPreviewMatch[1])),
+    });
+  }
+  const backupRestoreMatch = url.pathname.match(/^\/api\/admin\/backups\/([1-9]\d*)\/restore$/);
+  if (backupRestoreMatch && req.method === "POST") {
+    const input = await jsonBody(req);
+    const restore = await stageRestore(
+      db,
+      userHousehold,
+      user.id,
+      Number(backupRestoreMatch[1]),
+      input.confirmation,
+    );
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "backup_restore_staged",
+      targetType: "backup",
+      targetId: backupRestoreMatch[1],
+      address: clientAddress(req),
+      details: { restartRequired: true },
+    });
+    return send(res, 202, { restore });
+  }
+  if (url.pathname === "/api/exports/catalog.csv" && req.method === "GET") {
+    const content = exportCatalogCsv(db, userHousehold);
+    writeHead(res, 200, {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": "attachment; filename=\"book-vault-catalog.csv\"",
+      "Cache-Control": "no-store",
+    });
+    return res.end(`\uFEFF${content}`);
+  }
+  if (url.pathname === "/api/exports/loans.csv" && req.method === "GET") {
+    const content = exportLoansCsv(db, userHousehold);
+    writeHead(res, 200, {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": "attachment; filename=\"book-vault-loans.csv\"",
+      "Cache-Control": "no-store",
+    });
+    return res.end(`\uFEFF${content}`);
+  }
+  if (url.pathname === "/api/exports/household.json" && req.method === "GET") {
+    const content = JSON.stringify(exportHouseholdJson(db, userHousehold, user.id), null, 2);
+    writeHead(res, 200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Disposition": "attachment; filename=\"book-vault-household.json\"",
+      "Cache-Control": "no-store",
+    });
+    return res.end(content);
+  }
+  if (url.pathname === "/api/exports/reading.json" && req.method === "GET") {
+    const content = JSON.stringify(exportUserReadingJson(db, userHousehold, user.id), null, 2);
+    writeHead(res, 200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Disposition": "attachment; filename=\"book-vault-reading.json\"",
+      "Cache-Control": "no-store",
+    });
+    return res.end(content);
+  }
+  if (url.pathname === "/api/imports/presets" && req.method === "GET") {
+    return send(res, 200, importPresets());
+  }
+  if (url.pathname === "/api/imports/preview" && req.method === "POST") {
+    const preview = await previewImport(
+      db,
+      userHousehold,
+      user.id,
+      await jsonBody(req, maxImportBodyBytes),
+    );
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "import_dry_run",
+      targetType: "import",
+      targetId: preview.runId,
+      address: clientAddress(req),
+      details: { preset: preview.preset, rowCount: preview.rowCount, unknownColumns: preview.unknownHeaders.length },
+    });
+    return send(res, 201, { preview });
+  }
+  const importCommitMatch = url.pathname.match(/^\/api\/imports\/([1-9]\d*)\/commit$/);
+  if (importCommitMatch && req.method === "POST") {
+    const result = await commitImport(
+      db,
+      userHousehold,
+      user.id,
+      Number(importCommitMatch[1]),
+      await jsonBody(req),
+    );
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "import_completed",
+      targetType: "import",
+      targetId: result.runId,
+      address: clientAddress(req),
+      details: { imported: result.imported, skipped: result.skipped },
+    });
+    return send(res, 200, { import: result });
+  }
+  if (url.pathname === "/api/preferences") {
+    if (req.method === "GET") return send(res, 200, { preferences: userPreferences(db, user.id) });
+    if (req.method === "PUT") {
+      return send(res, 200, {
+        preferences: updateUserPreferences(db, userHousehold, user.id, await jsonBody(req)),
+      });
+    }
+  }
+  if (url.pathname === "/api/collections") {
+    if (req.method === "GET") return send(res, 200, listCollections(db, userHousehold, user.id));
+    if (req.method === "POST") {
+      const collection = createCollection(db, userHousehold, user.id, await jsonBody(req));
+      return send(res, 201, { collection });
+    }
+  }
+  const collectionMatch = url.pathname.match(/^\/api\/collections\/([1-9]\d*)$/);
+  if (collectionMatch && req.method === "PUT") {
+    return send(res, 200, updateCollection(
+      db,
+      userHousehold,
+      user.id,
+      Number(collectionMatch[1]),
+      await jsonBody(req, maxBulkBodyBytes),
+    ));
+  }
+  if (collectionMatch && req.method === "DELETE") {
+    return send(res, 200, deleteCollection(
+      db,
+      userHousehold,
+      user.id,
+      Number(collectionMatch[1]),
+    ));
+  }
+  if (url.pathname === "/api/custom-fields") {
+    if (req.method === "GET") return send(res, 200, listCustomFields(db, userHousehold));
+    if (req.method === "POST") {
+      return send(res, 201, { field: createCustomField(db, userHousehold, await jsonBody(req)) });
+    }
+  }
+  const customFieldValueMatch = url.pathname.match(
+    /^\/api\/custom-fields\/([1-9]\d*)\/(work|edition|copy)\/([1-9]\d*)$/,
+  );
+  if (customFieldValueMatch && req.method === "PUT") {
+    return send(res, 200, setCustomFieldValue(
+      db,
+      userHousehold,
+      Number(customFieldValueMatch[1]),
+      customFieldValueMatch[2],
+      Number(customFieldValueMatch[3]),
+      await jsonBody(req),
+    ));
+  }
+  if (url.pathname === "/api/locations") {
+    if (req.method === "GET") {
+      const includeArchived = url.searchParams.get("archived") !== "false";
+      return send(res, 200, locationInventory(db, userHousehold.household_id, { includeArchived }));
+    }
+    if (req.method === "POST") {
+      assertHouseholdAdmin(userHousehold);
+      const location = validatedLocationInput(await jsonBody(req));
+      assertValidLocationParent(db, userHousehold.household_id, null, location.parentId);
+      const result = db.prepare(`
+        INSERT INTO locations (
+          household_id, parent_id, name, level_type, sort_order, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        userHousehold.household_id,
+        location.parentId,
+        location.name,
+        location.levelType,
+        location.sortOrder,
+        user.id,
+      );
+      writeAuditEvent(db, {
+        householdId: userHousehold.household_id,
+        actorUserId: user.id,
+        eventType: "location_created",
+        targetType: "location",
+        targetId: Number(result.lastInsertRowid),
+        address: clientAddress(req),
+        details: { name: location.name, levelType: location.levelType, parentId: location.parentId },
+      });
+      return send(res, 201, {
+        id: String(result.lastInsertRowid),
+        ...locationInventory(db, userHousehold.household_id),
+      });
+    }
+  }
+  const locationMatch = url.pathname.match(/^\/api\/locations\/([1-9]\d*)$/);
+  if (locationMatch && req.method === "PATCH") {
+    assertHouseholdAdmin(userHousehold);
+    const locationId = Number(locationMatch[1]);
+    const existing = assertLocationInHousehold(db, userHousehold.household_id, locationId);
+    const input = await jsonBody(req);
+    const location = validatedLocationInput({
+      name: input.name ?? existing.name,
+      levelType: input.levelType ?? existing.level_type,
+      parentId: input.parentId === undefined ? existing.parent_id : input.parentId,
+      sortOrder: input.sortOrder ?? existing.sort_order,
+    });
+    assertValidLocationParent(db, userHousehold.household_id, locationId, location.parentId);
+    const archived = input.archived === undefined ? Boolean(existing.archived_at) : input.archived === true;
+    db.prepare(`
+      UPDATE locations SET parent_id = ?, name = ?, level_type = ?, sort_order = ?,
+        archived_at = CASE
+          WHEN ? = 1 AND archived_at IS NULL THEN CURRENT_TIMESTAMP
+          WHEN ? = 0 THEN NULL
+          ELSE archived_at
+        END,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND household_id = ?
+    `).run(
+      location.parentId,
+      location.name,
+      location.levelType,
+      location.sortOrder,
+      archived ? 1 : 0,
+      archived ? 1 : 0,
+      locationId,
+      userHousehold.household_id,
+    );
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: archived ? "location_archived" : "location_updated",
+      targetType: "location",
+      targetId: locationId,
+      address: clientAddress(req),
+      details: { name: location.name, parentId: location.parentId, archived },
+    });
+    return send(res, 200, locationInventory(db, userHousehold.household_id));
+  }
+  const locationLabelMatch = url.pathname.match(/^\/api\/locations\/([1-9]\d*)\/label$/);
+  if (locationLabelMatch && req.method === "GET") {
+    const locationId = Number(locationLabelMatch[1]);
+    assertLocationInHousehold(db, userHousehold.household_id, locationId);
+    const inventory = locationInventory(db, userHousehold.household_id);
+    const location = inventory.locations.find(candidate => candidate.id === String(locationId));
+    return send(res, 200, {
+      label: {
+        title: location.name,
+        breadcrumb: location.breadcrumb,
+        qrValue: location.qrValue,
+        copyCount: location.copyCount,
+      },
+    });
+  }
+  if (url.pathname === "/api/loans") {
+    if (req.method === "GET") {
+      return send(res, 200, listLoans(db, userHousehold, {
+        history: url.searchParams.get("history") === "true",
+        overdue: url.searchParams.get("overdue") === "true",
+      }));
+    }
+    if (req.method === "POST") {
+      const loan = checkoutCopy(db, userHousehold, user.id, await jsonBody(req));
+      writeAuditEvent(db, {
+        householdId: userHousehold.household_id,
+        actorUserId: user.id,
+        eventType: "copy_checked_out",
+        targetType: "loan",
+        targetId: loan.id,
+        address: clientAddress(req),
+        details: { copyId: loan.copyId, borrowerType: loan.borrower.type, dueAt: loan.dueAt },
+      });
+      return send(res, 201, { loan });
+    }
+  }
+  if (url.pathname === "/api/loans/batch-check-in" && req.method === "POST") {
+    const input = await jsonBody(req, maxBulkBodyBytes);
+    const result = batchCheckIn(db, userHousehold, user.id, input.barcodes);
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "loan_batch_check_in",
+      targetType: "loan",
+      address: clientAddress(req),
+      details: {
+        scans: result.results.length,
+        returned: result.results.filter(item => item.state === "success").length,
+      },
+    });
+    return send(res, 207, result);
+  }
+  const loanActionMatch = url.pathname.match(/^\/api\/loans\/([1-9]\d*)\/(return|renew|status)$/);
+  if (loanActionMatch && req.method === "POST") {
+    const input = await jsonBody(req);
+    const action = loanActionMatch[2];
+    const loan = action === "return"
+      ? returnLoan(db, userHousehold, user.id, Number(loanActionMatch[1]), input)
+      : action === "renew"
+        ? renewLoan(db, userHousehold, user.id, Number(loanActionMatch[1]), input)
+        : markLoan(db, userHousehold, user.id, Number(loanActionMatch[1]), input.status, input.notes);
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: `loan_${action}`,
+      targetType: "loan",
+      targetId: loan.id,
+      address: clientAddress(req),
+      details: { status: loan.status, dueAt: loan.dueAt },
+    });
+    return send(res, 200, { loan });
+  }
+  if (url.pathname === "/api/holds") {
+    if (req.method === "GET") return send(res, 200, listHolds(db, userHousehold));
+    if (req.method === "POST") {
+      const input = await jsonBody(req);
+      const hold = createHold(db, userHousehold, user.id, input.workId);
+      return send(res, 201, { hold });
+    }
+  }
+  const holdMatch = url.pathname.match(/^\/api\/holds\/([1-9]\d*)$/);
+  if (holdMatch && req.method === "DELETE") {
+    return send(res, 200, cancelHold(db, userHousehold, user.id, Number(holdMatch[1])));
+  }
+  const readingWorkMatch = url.pathname.match(/^\/api\/reading\/works\/([1-9]\d*)$/);
+  if (readingWorkMatch) {
+    if (req.method === "GET") {
+      const requestedUserId = url.searchParams.get("userId") || user.id;
+      return send(res, 200, readingDetail(
+        db,
+        userHousehold,
+        user.id,
+        Number(readingWorkMatch[1]),
+        requestedUserId,
+      ));
+    }
+    if (req.method === "PUT") {
+      const state = updateReadingState(
+        db,
+        userHousehold,
+        user.id,
+        Number(readingWorkMatch[1]),
+        await jsonBody(req),
+      );
+      return send(res, 200, { state });
+    }
+  }
+  const readingSessionCreateMatch = url.pathname.match(/^\/api\/reading\/works\/([1-9]\d*)\/sessions$/);
+  if (readingSessionCreateMatch && req.method === "POST") {
+    const session = createReadingSession(
+      db,
+      userHousehold,
+      user.id,
+      Number(readingSessionCreateMatch[1]),
+      await jsonBody(req),
+    );
+    return send(res, 201, { session });
+  }
+  const readingSessionMatch = url.pathname.match(/^\/api\/reading\/sessions\/([1-9]\d*)$/);
+  if (readingSessionMatch && req.method === "PATCH") {
+    const session = updateReadingSession(
+      db,
+      userHousehold,
+      user.id,
+      Number(readingSessionMatch[1]),
+      await jsonBody(req),
+    );
+    return send(res, 200, { session });
+  }
+  if (url.pathname === "/api/reading/preferences" && req.method === "PUT") {
+    return send(res, 200, updateReadingPreferences(db, userHousehold, user.id, await jsonBody(req)));
+  }
+  if (url.pathname === "/api/reading/statistics" && req.method === "GET") {
+    return send(res, 200, readingStatistics(db, userHousehold, user.id));
+  }
+  if (url.pathname === "/api/household/statistics" && req.method === "GET") {
+    return send(res, 200, householdReadingStatistics(db, userHousehold));
   }
   if (url.pathname === "/api/settings") {
     if (req.method === "GET") return send(res, 200, { settings: settingsForUser(user.id) });
@@ -585,16 +1711,11 @@ async function api(req, res, url) {
       audit("book_lookup_rate_limited", req, { userId: user.id });
       return send(res, 429, { error: "Too many book searches. Try again in a few minutes." }, { "Retry-After": "300" });
     }
-    const cacheKey = `${type}:${query.toLocaleLowerCase()}`;
-    const cached = bookLookupCache.get(cacheKey);
-    if (cached?.expiresAt > Date.now()) return send(res, 200, cached.value);
-    const result = await lookupBooks(query, type, {
+    const result = await configuredLookup(db, userHousehold, query, type, {
       googleApiKey: process.env.GOOGLE_BOOKS_API_KEY,
       hardcoverToken: process.env.HARDCOVER_API_TOKEN,
       timeoutMs: process.env.BOOK_LOOKUP_TIMEOUT_MS,
     });
-    if (bookLookupCache.size >= 100) bookLookupCache.delete(bookLookupCache.keys().next().value);
-    bookLookupCache.set(cacheKey, { value: result, expiresAt: Date.now() + 10 * 60 * 1000 });
     audit("book_lookup", req, { userId: user.id, type, resultCount: result.results.length });
     return send(res, 200, result);
   }
@@ -615,6 +1736,202 @@ async function api(req, res, url) {
       provider,
     });
     audit("series_lookup", req, { userId: user.id, requestedProvider: provider, provider: result.provider, resultCount: result.books.length });
+    return send(res, 200, result);
+  }
+  if (req.method === "GET" && url.pathname === "/api/catalog") {
+    return send(res, 200, listCatalog(db, userHousehold, user.id, {
+      page: url.searchParams.get("page"),
+      pageSize: url.searchParams.get("pageSize"),
+      search: url.searchParams.get("q"),
+      status: url.searchParams.get("status"),
+      format: url.searchParams.get("format"),
+      readStatus: url.searchParams.get("readStatus"),
+      owner: url.searchParams.get("owner"),
+      locationId: url.searchParams.get("locationId"),
+      sort: url.searchParams.get("sort"),
+      direction: url.searchParams.get("direction"),
+    }));
+  }
+  if (req.method === "GET" && url.pathname === "/api/catalog/stats") {
+    return send(res, 200, { stats: catalogStats(db, userHousehold.household_id) });
+  }
+  if (req.method === "GET" && url.pathname === "/api/catalog/activity") {
+    return send(res, 200, catalogActivity(db, userHousehold, user.id));
+  }
+  if (req.method === "GET" && url.pathname === "/api/catalog/duplicate-groups") {
+    return send(res, 200, duplicateCopyGroups(db, userHousehold));
+  }
+  if (req.method === "GET" && url.pathname === "/api/catalog/series") {
+    return send(res, 200, seriesInventory(db, userHousehold));
+  }
+  if (req.method === "POST" && url.pathname === "/api/catalog/duplicates") {
+    const input = await jsonBody(req);
+    return send(res, 200, duplicateWarnings(db, userHousehold, input, user.id));
+  }
+  if (req.method === "POST" && url.pathname === "/api/catalog/copies/move") {
+    const input = await jsonBody(req, maxBulkBodyBytes);
+    if (!Array.isArray(input.copyIds)) return send(res, 400, { error: "Select copies to move" });
+    const result = moveCopies(db, userHousehold, user.id, input.copyIds, input.locationId);
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "copies_bulk_moved",
+      targetType: "location",
+      targetId: result.locationId,
+      address: clientAddress(req),
+      details: { copyCount: result.moved },
+    });
+    return send(res, 200, result);
+  }
+  if (req.method === "POST" && url.pathname === "/api/catalog/batch") {
+    const input = await jsonBody(req, maxBulkBodyBytes);
+    if (!Array.isArray(input.entries) || !input.entries.length || input.entries.length > 100) {
+      return send(res, 400, { error: "The scan queue must contain between 1 and 100 entries" });
+    }
+    const reviewOnly = input.mode !== "save";
+    const results = [];
+    for (let index = 0; index < input.entries.length; index += 1) {
+      const rawEntry = input.entries[index] || {};
+      try {
+        const entry = validatedCatalogInput(rawEntry);
+        const duplicates = duplicateWarnings(db, userHousehold, entry, user.id).warnings;
+        if (reviewOnly) {
+          results.push({
+            index,
+            state: duplicates.length ? "duplicate" : "success",
+            entry,
+            duplicates,
+            actions: duplicates.length
+              ? ["view_existing", "add_another_copy", "add_different_edition", "move_wishlist_to_owned", "cancel"]
+              : ["save", "edit", "cancel"],
+          });
+          continue;
+        }
+        if (rawEntry.duplicateAction === "cancel") {
+          results.push({ index, state: "warning", skipped: true, reason: "Cancelled during duplicate review", duplicates });
+          continue;
+        }
+        const created = createCatalogItem(db, userHousehold, user.id, {
+          ...entry,
+          forceNewEdition: rawEntry.duplicateAction === "add_different_edition",
+          moveWishlistToOwned: rawEntry.duplicateAction === "move_wishlist_to_owned",
+        });
+        let coverCache = null;
+        if (entry.coverUrl) {
+          try {
+            coverCache = await cacheExternalCover(
+              db,
+              userHousehold.household_id,
+              created.editionId,
+              entry.coverUrl,
+            );
+          } catch (error) {
+            coverCache = { status: "failed", error: error.message || "Cover caching failed" };
+          }
+        }
+        results.push({ index, state: "success", created, duplicates, coverCache });
+      } catch (error) {
+        results.push({ index, state: "failure", error: error.message || "Unable to save this scan" });
+      }
+    }
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: reviewOnly ? "scan_queue_reviewed" : "scan_queue_saved",
+      targetType: "catalog",
+      address: clientAddress(req),
+      details: {
+        total: results.length,
+        successes: results.filter(result => result.state === "success").length,
+        failures: results.filter(result => result.state === "failure").length,
+      },
+    });
+    return send(res, reviewOnly ? 200 : 207, { mode: reviewOnly ? "review" : "save", results });
+  }
+  if (req.method === "POST" && url.pathname === "/api/catalog") {
+    const input = validatedCatalogInput(await jsonBody(req, maxBulkBodyBytes));
+    const duplicates = duplicateWarnings(db, userHousehold, input, user.id).warnings;
+    const result = createCatalogItem(db, userHousehold, user.id, input);
+    let coverCache = input.coverUrl ? { status: "pending" } : { status: "not_requested" };
+    if (input.coverUrl) {
+      try {
+        const cover = await cacheExternalCover(
+          db,
+          userHousehold.household_id,
+          result.editionId,
+          input.coverUrl,
+        );
+        coverCache = { status: "cached", ...cover };
+      } catch (error) {
+        coverCache = { status: "failed", error: error.message || "Cover caching failed" };
+      }
+    }
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: input.status === "owned" ? "catalog_copy_created" : "catalog_list_entry_created",
+      targetType: "work",
+      targetId: result.workId,
+      address: clientAddress(req),
+      details: { source: input.source, createdCount: result.created.length, duplicateWarnings: duplicates.length },
+    });
+    return send(res, 201, { ...result, duplicates, coverCache });
+  }
+  const catalogMatch = url.pathname.match(/^\/api\/catalog\/(copy|list)\/([1-9]\d*)$/);
+  if (req.method === "GET" && catalogMatch) {
+    return send(res, 200, catalogItemDetail(
+      db,
+      userHousehold,
+      user.id,
+      catalogMatch[1],
+      Number(catalogMatch[2]),
+    ));
+  }
+  if (req.method === "PUT" && catalogMatch) {
+    const rawInput = await jsonBody(req, maxBulkBodyBytes);
+    const input = catalogMatch[1] === "copy" ? validatedCatalogInput(rawInput) : rawInput;
+    const result = updateCatalogItem(
+      db,
+      userHousehold,
+      user.id,
+      catalogMatch[1],
+      Number(catalogMatch[2]),
+      input,
+    );
+    let coverCache = null;
+    if (catalogMatch[1] === "copy" && input.coverUrl) {
+      try {
+        coverCache = await cacheExternalCover(
+          db,
+          userHousehold.household_id,
+          Number(result.item.editionId),
+          input.coverUrl,
+        );
+      } catch (error) {
+        coverCache = { status: "failed", error: error.message || "Cover caching failed" };
+      }
+    }
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "catalog_item_updated",
+      targetType: catalogMatch[1],
+      targetId: catalogMatch[2],
+      address: clientAddress(req),
+      details: { coverCached: Boolean(coverCache?.url) },
+    });
+    return send(res, 200, { ...result, coverCache });
+  }
+  if (req.method === "DELETE" && catalogMatch) {
+    const result = archiveCatalogItem(db, userHousehold, user.id, catalogMatch[1], Number(catalogMatch[2]));
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: catalogMatch[1] === "copy" ? "catalog_copy_archived" : "catalog_list_entry_archived",
+      targetType: catalogMatch[1],
+      targetId: catalogMatch[2],
+      address: clientAddress(req),
+    });
     return send(res, 200, result);
   }
   if (req.method === "GET" && url.pathname === "/api/books/duplicates") {
@@ -763,8 +2080,10 @@ async function api(req, res, url) {
       if (!name || name.length > 100 || !validEmail(email) || problem) return send(res, 400, { error: problem || "A valid name and email are required" });
       if (!["admin", "user"].includes(role)) return send(res, 400, { error: "Invalid role" });
       try {
-        const result = db.prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)")
-          .run(name, email, await hashPassword(password), role);
+        const systemRole = role === "admin" ? "system_admin" : "user";
+        const result = db.prepare("INSERT INTO users (name, email, password_hash, role, system_role) VALUES (?, ?, ?, ?, ?)")
+          .run(name, email, await hashPassword(password), role, systemRole);
+        ensureUserHousehold(db, Number(result.lastInsertRowid), name, { systemAdmin: role === "admin" });
         audit("user_created", req, { actorId: user.id, userId: Number(result.lastInsertRowid), role });
         return send(res, 201, { user: publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(result.lastInsertRowid)) });
       } catch (error) {
@@ -781,7 +2100,9 @@ async function staticFile(req, res, pathname) {
   const rel = relative(publicDir, file);
   if (rel.startsWith("..") || isAbsolute(rel)) return send(res, 403, { error: "Forbidden" });
   try { if (!(await stat(file)).isFile()) throw new Error(); } catch { file = join(publicDir, "index.html"); }
-  const cache = file.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable";
+  const cache = file.endsWith("index.html") || file.endsWith("sw.js") || file.endsWith("manifest.webmanifest")
+    ? "no-cache"
+    : "public, max-age=31536000, immutable";
   writeHead(res, 200, { "Content-Type": mime[extname(file)] || "application/octet-stream", "Cache-Control": cache });
   if (req.method === "HEAD") return res.end();
   res.end(await readFile(file));
@@ -791,7 +2112,7 @@ export const server = createServer(async (req, res) => {
   try {
     const unsafe = !["GET", "HEAD", "OPTIONS"].includes(req.method || "");
     const origin = req.headers.origin;
-    const protocol = req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
+    const protocol = req.socket.encrypted || (trustProxy && req.headers["x-forwarded-proto"] === "https") ? "https" : "http";
     if (unsafe && origin && origin !== `${protocol}://${req.headers.host}`) return send(res, 403, { error: "Cross-origin request rejected" });
     if (url.pathname.startsWith("/api/")) await api(req, res, url);
     else if (req.method === "GET" || req.method === "HEAD") await staticFile(req, res, url.pathname);
@@ -804,6 +2125,7 @@ export const server = createServer(async (req, res) => {
 server.requestTimeout = 15_000;
 server.headersTimeout = 10_000;
 server.keepAliveTimeout = 5_000;
+let maintenanceTimer;
 
 export function startServer(listenPort = port, listenHost = host) {
   return new Promise((resolveListen, reject) => {
@@ -814,6 +2136,11 @@ export function startServer(listenPort = port, listenHost = host) {
     const onListening = () => {
       server.off("error", onError);
       console.log(`BookVault listening on http://${listenHost}:${server.address().port}`);
+      if (!maintenanceTimer) {
+        void runScheduledBackups(db);
+        maintenanceTimer = setInterval(() => void runScheduledBackups(db), 60 * 60 * 1000);
+        maintenanceTimer.unref();
+      }
       resolveListen(server);
     };
     server.once("error", onError);

@@ -1,6 +1,5 @@
-import { useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
-import { BookOpen, Layers, Plus } from 'lucide-react';
+import { useState } from 'react';
+import { BookOpen, ChevronDown, ChevronRight, Layers, Loader2, Plus, TriangleAlert } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/auth';
 import { UserBook } from '@/types/book';
@@ -9,147 +8,149 @@ import { Button } from '@/components/ui/button';
 import AddSeriesDialog from '@/components/AddSeriesDialog';
 import EditBookDialog from '@/components/EditBookDialog';
 
-function seriesPosition(book: UserBook) {
-  const raw = book.book.seriesNumber;
-  if (raw == null || raw === '') return Number.POSITIVE_INFINITY;
-  const numeric = Number(raw);
-  return Number.isFinite(numeric) ? numeric : Number.POSITIVE_INFINITY;
-}
+type SeriesResponse = {
+  series: {
+    id: string;
+    name: string;
+    workCount: number;
+    ownedWorkCount: number;
+    missingVolumes: number[];
+    books: {
+      workId: string;
+      title: string;
+      author: string;
+      volume: string | null;
+      readingOrder: number | null;
+      role: string;
+      includedVolumes: string[];
+      editionCount: number;
+      copyCount: number;
+      wishlisted: boolean;
+      copyId: string | null;
+      listId: string | null;
+    }[];
+  }[];
+};
 
 export default function SeriesPage() {
   const [showAddSeries, setShowAddSeries] = useState(false);
   const [editingBook, setEditingBook] = useState<UserBook | null>(null);
+  const [opening, setOpening] = useState('');
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const { data, isLoading, error } = useQuery({
-    queryKey: ['books'],
-    queryFn: () => api<{ books: UserBook[] }>('/api/books'),
+    queryKey: ['catalog-series'],
+    queryFn: () => api<SeriesResponse>('/api/catalog/series'),
   });
 
-  const groups = useMemo(() => {
-    const bySeries = new Map<string, UserBook[]>();
-    for (const item of data?.books || []) {
-      if (!['owned', 'wishlist'].includes(item.status) || !item.book.series) continue;
-      const books = bySeries.get(item.book.series) || [];
-      books.push(item);
-      bySeries.set(item.book.series, books);
+  async function openBook(copyId: string | null, listId: string | null) {
+    const path = copyId ? `copy/${copyId}` : listId ? `list/${listId}` : null;
+    if (!path) return;
+    setOpening(path);
+    try {
+      const detail = await api<{ item: UserBook }>(`/api/catalog/${path}`);
+      setEditingBook(detail.item);
+    } finally {
+      setOpening('');
     }
-    return [...bySeries.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([name, books]) => ({
-        name,
-        books: books.sort((left, right) =>
-          seriesPosition(left) - seriesPosition(right) || left.book.title.localeCompare(right.book.title)),
-      }));
-  }, [data?.books]);
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground">Series</h1>
-          <p className="mt-1 text-muted-foreground">Track complete series across your collection and wishlist</p>
+          <h1 className="text-3xl font-heading font-bold">Series</h1>
+          <p className="mt-1 text-muted-foreground">Decimal positions, prequels, novellas, omnibus contents, and reading order stay intact.</p>
         </div>
         <Button type="button" className="gradient-warm w-fit gap-2 text-primary-foreground" onClick={() => setShowAddSeries(true)}>
-          <Plus className="h-4 w-4" />
-          Add Book Series
+          <Plus className="h-4 w-4" />Add book series
         </Button>
       </div>
 
       {isLoading ? (
-        <div className="py-16 text-center text-muted-foreground">Loading your series…</div>
+        <div className="py-16 text-center text-muted-foreground">Loading series…</div>
       ) : error ? (
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-6 text-center text-destructive">
           {error instanceof Error ? error.message : 'Could not load series'}
         </div>
-      ) : groups.length ? (
+      ) : data?.series.length ? (
         <div className="space-y-5">
-          {groups.map((series, groupIndex) => (
-            <motion.section
-              key={series.name}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: groupIndex * 0.05 }}
-              className="overflow-hidden rounded-xl border border-border bg-card shadow-card"
-            >
-              <header className="flex items-center justify-between border-b border-border px-5 py-4">
-                <div className="flex items-center gap-3">
-                  <span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-primary">
-                    <Layers className="h-4 w-4" />
-                  </span>
-                  <div>
-                    <h2 className="font-heading text-xl font-bold text-foreground">{series.name}</h2>
-                    <p className="text-sm text-muted-foreground">
-                      {series.books.length} tracked {series.books.length === 1 ? 'book' : 'books'}
-                    </p>
-                  </div>
-                </div>
-              </header>
-
-              <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-                {series.books.map(item => (
-                  <div
-                    key={item.id}
-                    className="flex cursor-pointer gap-3 rounded-lg border border-border bg-background/50 p-3 focus:outline-none focus:ring-2 focus:ring-ring"
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Edit ${item.book.title}`}
-                    onClick={() => setEditingBook(item)}
-                    onKeyDown={event => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setEditingBook(item);
-                      }
-                    }}
-                  >
-                    <div className="h-24 w-16 flex-shrink-0 overflow-hidden rounded bg-muted">
-                      {item.book.coverUrl ? (
-                        <img
-                          src={item.book.coverUrl}
-                          alt={`${item.book.title} cover`}
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                          onError={event => { event.currentTarget.src = '/placeholder.svg'; }}
-                        />
-                      ) : (
-                        <div className="grid h-full place-items-center">
-                          <BookOpen className="h-6 w-6 text-muted-foreground/50" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex flex-wrap gap-1">
-                        {item.book.seriesNumber && <Badge variant="secondary">#{item.book.seriesNumber}</Badge>}
-                        {item.book.collection && <Badge variant="outline">{item.book.collection}</Badge>}
-                        <Badge variant={item.status === 'owned' ? 'default' : 'outline'}>
-                          {item.status === 'owned' ? 'Collection' : 'Wishlist'}
-                        </Badge>
-                      </div>
-                      <h3 className="line-clamp-2 font-heading font-semibold text-foreground">{item.book.title}</h3>
-                      <p className="line-clamp-1 text-sm text-muted-foreground">{item.book.author}</p>
+          {data.series.map(series => {
+            const isCollapsed = collapsed.has(series.id);
+            return (
+              <section key={series.id} className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 border-b border-border px-5 py-4 text-left focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring"
+                  aria-expanded={!isCollapsed}
+                  onClick={() => setCollapsed(current => {
+                    const next = new Set(current);
+                    if (next.has(series.id)) next.delete(series.id); else next.add(series.id);
+                    return next;
+                  })}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-primary"><Layers className="h-4 w-4" /></span>
+                    <div>
+                      <h2 className="font-heading text-xl font-bold">{series.name}</h2>
+                      <p className="text-sm text-muted-foreground">{series.ownedWorkCount} owned of {series.workCount} tracked works</p>
                     </div>
                   </div>
-                ))}
-              </div>
-            </motion.section>
-          ))}
+                  <div className="flex items-center gap-2">
+                    {series.missingVolumes.length > 0 && (
+                      <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-300">
+                        <TriangleAlert className="mr-1 h-3 w-3" />Missing {series.missingVolumes.join(', ')}
+                      </Badge>
+                    )}
+                    {isCollapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                  </div>
+                </button>
+                {!isCollapsed && (
+                  <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {series.books.map(book => {
+                      const path = book.copyId ? `copy/${book.copyId}` : book.listId ? `list/${book.listId}` : '';
+                      return (
+                        <button
+                          key={`${book.workId}:${book.role}:${book.volume}`}
+                          type="button"
+                          disabled={!path}
+                          className="flex gap-3 rounded-lg border border-border bg-background/50 p-3 text-left hover:border-primary focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-default"
+                          onClick={() => void openBook(book.copyId, book.listId)}
+                        >
+                          <div className="grid h-16 w-11 flex-none place-items-center rounded bg-muted"><BookOpen className="h-5 w-5 text-muted-foreground/50" /></div>
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex flex-wrap gap-1">
+                              {book.volume && <Badge variant="secondary">Volume {book.volume}</Badge>}
+                              {book.readingOrder != null && <Badge variant="outline">Read {book.readingOrder}</Badge>}
+                              {book.role !== 'main' && <Badge variant="outline">{book.role}</Badge>}
+                              <Badge variant={book.copyCount ? 'default' : 'outline'}>
+                                {book.copyCount ? `${book.copyCount} owned` : book.wishlisted ? 'Wishlist' : 'Missing'}
+                              </Badge>
+                            </div>
+                            <h3 className="line-clamp-2 font-heading font-semibold">{book.title}</h3>
+                            <p className="line-clamp-1 text-sm text-muted-foreground">{book.author}</p>
+                            {book.includedVolumes.length > 0 && (
+                              <p className="text-xs text-muted-foreground">Includes {book.includedVolumes.join(', ')}</p>
+                            )}
+                            {opening === path && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            );
+          })}
         </div>
       ) : (
         <div className="rounded-xl border border-dashed border-border py-16 text-center text-muted-foreground">
           <Layers className="mx-auto mb-3 h-9 w-9 opacity-50" />
           <p className="font-heading text-lg">No series yet</p>
-          <p className="mt-1 text-sm">Use Add Book Series to find and classify every volume at once.</p>
         </div>
       )}
 
-      <AddSeriesDialog
-        open={showAddSeries}
-        onOpenChange={setShowAddSeries}
-        existingBooks={data?.books || []}
-      />
-      <EditBookDialog
-        book={editingBook}
-        open={Boolean(editingBook)}
-        onOpenChange={open => { if (!open) setEditingBook(null); }}
-      />
+      <AddSeriesDialog open={showAddSeries} onOpenChange={setShowAddSeries} existingBooks={[]} />
+      <EditBookDialog book={editingBook} open={Boolean(editingBook)} onOpenChange={open => { if (!open) setEditingBook(null); }} />
     </div>
   );
 }

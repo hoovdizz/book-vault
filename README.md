@@ -1,36 +1,79 @@
-# BookVault
+# Book Vault
 
-BookVault is a self-hosted personal book-library interface packaged as one lightweight container. The web app, API, authentication, and embedded SQLite database all run together; no separate database container is required.
+Book Vault is an original, self-hosted household book catalog, circulation system, and private reading tracker. It runs as one container with a React PWA, a Node API, and an embedded SQLite database. No separate database container or public account service is required.
 
-Collection, Series, Dashboard, Backlog, Wishlist, and Duplicate Finder all use books stored in SQLite. Libraries are isolated per user by default; optional families share owned physical books while keeping each member's reading state, Wishlist, and Backlog personal.
+Book Vault models a title at three distinct levels:
+
+- A **work** is the conceptual book.
+- An **edition** is a publication with its own ISBN, publisher, binding, language, date, page count, provider records, and cover.
+- A **copy** is a physical, ebook, or audiobook item owned by a person or by the household. Every copy can have its own owner, location, condition, purchase details, custom barcode, history, and loan state.
+
+Reading state and sessions belong to an individual person and a work or edition. They never belong to a shared physical copy. Loans always identify a particular copy.
+
+## Highlights
+
+- Household roles: system administrator, household administrator, adult, child, and read-only viewer
+- Private per-person reading notes, status, history, ratings, favorites, goals, and preferred formats
+- ISBN-10/ISBN-13, title, author, camera, USB, and Bluetooth scanner entry
+- Continuous batch scanning with editable review results and intentional duplicate-copy actions
+- Google Books and Open Library behind a configurable, cached provider interface
+- Optional Hardcover enrichment for covers and series data
+- Hierarchical buildings, rooms, bookcases, shelves, and bins with printable QR labels
+- Cover, detailed, and compact catalog views with server pagination, saved filters, custom collections, tags, and custom fields
+- Edition-aware duplicate review, series positions including decimals and omnibus roles, and missing-volume indicators
+- Historical loans, member or external borrowers, holds, due dates, renewals, overdue/lost/damaged states, and batch check-in
+- CSV import dry runs and mappings for Goodreads, LibraryThing, Libib, CLZ Books, BookBuddy, and generic CSV
+- CSV/JSON/reading/loan exports, downloadable backups, restore preview, and SQLite integrity checks
+- Installable PWA with a cached application shell and a deliberate offline screen; authenticated data is not placed in the public service-worker cache
+- Light/dark themes, visible keyboard focus, reduced-motion support, labels, responsive layouts, and large touch targets
+
+Book Vault does not copy the code, branding, wording, or layouts of another catalog product.
+
+## Persistent container data
+
+All durable data lives under `/config`:
+
+```text
+/config/book-vault.sqlite
+/config/backups/
+/config/covers/
+/config/uploads/
+/config/imports/
+/config/logs/
+```
+
+The database uses SQLite WAL mode. Book Vault creates a consistent SQLite snapshot before its first destructive schema migration and records every applied schema version. Existing users, safely reusable hashed sessions, households/families, books, reading state, locations, conditions, loan records, covers, wishlist entries, backlog entries, collections, series, editions, and formats are migrated without silently deleting the legacy rows.
+
+Raw-token sessions from the earliest schema are intentionally invalidated instead of retaining exposed bearer credentials. Users simply sign in again.
+
+Do not store the only backup inside an unmounted container filesystem. Map the complete `/config` directory to persistent storage.
 
 ## Container settings
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | Container port | `8130` | Web interface and API |
-| `/config` | required | Persistent SQLite database location |
+| `/config` | required | Persistent application data |
+| `PUID` | `99` | Runtime UID (`nobody` on Unraid) |
+| `PGID` | `100` | Runtime GID (`users` on Unraid) |
 | `TZ` | `America/New_York` | Container timezone |
-| `PUID` | `99` | Runtime user and `/config` owner (`nobody` on Unraid) |
-| `PGID` | `100` | Runtime group and `/config` group (`users` on Unraid) |
-| `GOOGLE_BOOKS_API_KEY` | optional | Server-side Google Books API key; Open Library remains available as fallback |
-| `HARDCOVER_API_TOKEN` | optional | Private server-side Hardcover token for extra cover choices and complete series metadata |
-| `BOOK_LOOKUP_TIMEOUT_MS` | `6000` | Per-provider lookup timeout, bounded to 2–10 seconds |
-| `ADMIN_NAME` | `bookvaultadmin` | Initial admin name, used only with a new database |
-| `ADMIN_EMAIL` | `admin@bookvault.local` in the Unraid template | Initial admin login, used only with a new database |
-| `ADMIN_PASSWORD` | `bookvaultpassword` in the Unraid template | Initial 12–128 character admin password |
-| `SESSION_DAYS` | `30` | Login session lifetime |
-| `DATABASE_PATH` | `/config/book-vault.sqlite` | Embedded database file |
+| `DATABASE_PATH` | `/config/book-vault.sqlite` | SQLite path inside the container |
+| `ADMIN_NAME` | `bookvaultadmin` | First administrator display name |
+| `ADMIN_EMAIL` | `admin@bookvault.local` in the template | First administrator login |
+| `ADMIN_PASSWORD` | no default | Required unique 12–128 character first-run password |
+| `SESSION_DAYS` | `30` | Server-side session lifetime |
+| `GOOGLE_BOOKS_API_KEY` | empty | Optional server-side API key |
+| `HARDCOVER_API_TOKEN` | empty | Optional server-side Hardcover token |
+| `BOOK_LOOKUP_TIMEOUT_MS` | `6000` | Per-provider timeout, bounded to 2–10 seconds |
+| `TRUST_PROXY` | `false` | Trust `X-Forwarded-Proto` only behind a controlled proxy |
 
-The database uses SQLite WAL mode, similar to the embedded-database approach used by Sonarr and Radarr. Back up the complete `/config` directory, including any `-wal` and `-shm` files.
-
-Container upgrades automatically add new book-copy, settings, family, and per-reader status tables to an existing database in place. Existing accounts, books, reading states, and sessions are retained; keeping a current `/config` backup before any upgrade is still recommended.
+The administrator variables are used only when the database has no users. Changing them later does not reset an existing account. Book Vault deliberately has no production default password and public registration is disabled.
 
 ## Install on Unraid
 
-### Install the Unraid template
+### Install the template
 
-Unraid's **Add Container** advanced view does not have a field for a remote template URL. Install the XML file from the Unraid terminal instead:
+Unraid’s **Add Container** advanced view does not contain a remote-template URL field. Install the XML from the Unraid terminal:
 
 ```sh
 mkdir -p /boot/config/plugins/dockerMan/templates-user
@@ -41,206 +84,43 @@ curl --fail --location \
 
 Then:
 
-1. Open the **Docker** tab and select **Add Container**.
-2. Open the **Template** dropdown at the top and select **BookVault**. Refresh the page if it does not appear immediately.
-3. Use repository `ghcr.io/hoovdizz/book-vault:development`.
-4. Map `/config` to `/mnt/user/appdata/book-vault`.
-5. Map container port `8130` to an available host port, normally `8130`.
-6. The template supplies `admin@bookvault.local` and `bookvaultpassword` for the initial login. Change the password before first launch, especially if the server is reachable by untrusted devices.
+1. Open **Docker → Add Container**.
+2. Select **BookVault** from the **Template** dropdown. Refresh the page if it was already open.
+3. Confirm repository `ghcr.io/hoovdizz/book-vault:development`.
+4. Confirm host path `/mnt/user/appdata/book-vault` maps to container path `/config`.
+5. Confirm host port `8130` maps to container port `8130`.
+6. Enter a unique value in **Admin password**. The field is intentionally blank.
 7. Select **Apply**, then open `http://UNRAID-IP:8130`.
 
-To remove the locally installed template later:
-
-```sh
-rm /boot/config/plugins/dockerMan/templates-user/my-book-vault.xml
-```
+The template source is [`unraid/book-vault.xml`](unraid/book-vault.xml). [`unraid-defaults.yaml`](unraid-defaults.yaml) is a human-readable reference; Unraid does not import YAML container templates.
 
 ### Add the container manually
 
-If you prefer not to install the XML template, select **Docker → Add Container** and enter:
+In **Docker → Add Container**, use:
 
-| Unraid field | Value |
+| Field | Value |
 | --- | --- |
 | Name | `BookVault` |
 | Repository | `ghcr.io/hoovdizz/book-vault:development` |
-| Network Type | `Bridge` |
+| Network type | `Bridge` |
 | WebUI | `http://[IP]:[PORT:8130]` |
 
-Use **Add another Path, Port, Variable, Label or Device** to add:
+Use **Add another Path, Port, Variable, Label or Device** for:
 
-| Type | Name | Container target | Host/default value |
-| --- | --- | --- | --- |
-| Port | Web UI | `8130` | `8130` |
-| Path | Appdata | `/config` | `/mnt/user/appdata/book-vault` |
-| Variable | Timezone | `TZ` | `America/New_York` |
-| Variable | User ID | `PUID` | `99` (`nobody` on Unraid) |
-| Variable | Group ID | `PGID` | `100` (`users` on Unraid) |
-| Variable | Google Books API key | `GOOGLE_BOOKS_API_KEY` | Optional API key, stored as a masked value |
-| Variable | Hardcover API token | `HARDCOVER_API_TOKEN` | Optional token, stored as a masked value |
-| Variable | Book lookup timeout | `BOOK_LOOKUP_TIMEOUT_MS` | `6000` |
-| Variable | Admin name | `ADMIN_NAME` | `bookvaultadmin` |
-| Variable | Admin email | `ADMIN_EMAIL` | `admin@bookvault.local` |
-| Variable | Admin password | `ADMIN_PASSWORD` | `bookvaultpassword` (change before first launch) |
+| Type | Target | Host/default value |
+| --- | --- | --- |
+| Port | `8130` | `8130` |
+| Path | `/config` | `/mnt/user/appdata/book-vault` |
+| Variable | `PUID` | `99` |
+| Variable | `PGID` | `100` |
+| Variable | `TZ` | `America/New_York` |
+| Variable | `ADMIN_NAME` | `bookvaultadmin` |
+| Variable | `ADMIN_EMAIL` | your administrator email |
+| Variable | `ADMIN_PASSWORD` | a unique password of at least 12 characters |
 
-The admin environment variables create the first account only when the database is empty. Changing them later does not change an existing account.
+Optional variables are listed in the container-settings table above.
 
-### Add books
-
-Open **Collection → Add Book** or **Wishlist → Add to Wishlist** and search with a title, ISBN-10, or ISBN-13. Select the camera button to scan the 978/979 ISBN barcode with a phone. Live scanning uses the rear camera over HTTPS; when BookVault is opened over plain HTTP, use **Take or choose barcode photo** instead. The photo is decoded locally in the browser and is never uploaded. Both add buttons use the same provider search, metadata, and cover-selection flow; the Wishlist button automatically saves the book with a wishlist status. Select a result, choose a cover, then optionally record its collection, series, series position, format, binding, and edition before saving. Use **Move to Collection** on a wishlist title after purchasing it; the change is persisted in SQLite.
-
-Open **Settings → Library defaults** to choose the location, binding, and condition preselected for each new physical book. Enter saved physical locations one per line, such as `Bookshelf in den`, `Tote in den`, and `Bookshelf in kids room`. Each book can use a saved location or a new free-form location. Physical locations appear on book cards, are searchable, and can be used as a Collection filter.
-
-Select any saved book to open its editor. Use **Remove book** and confirm **Remove permanently** to delete that copy from BookVault. In a family library, only the member who added a copy can remove it or move it out of the Collection; family members can update its physical details and their own reading status.
-
-Click any persisted book card to edit its metadata, cover, format, Collection/Wishlist/Backlog section, physical location, and **Unread / Currently reading / Read** status. Each physical copy can also record its binding, edition, condition grade, free-form damage notes such as bent corners or a broken spine, and whether it is loaned out. A loan can include the borrower's name and loan date. Loaned books have a visible badge and are counted on the Dashboard. The **More** button in the editor repeats the provider lookup and adds newly found cover editions without discarding the current cover.
-
-Open **Series → Add Book Series**, choose **Auto**, **Hardcover**, or **Open Library**, search by series name, and review the returned volumes. Hardcover is the preferred source for exact series positions and requires `HARDCOVER_API_TOKEN`. Auto tries Hardcover when configured and falls back to Open Library. Open Library positions are read from its series metadata when present; missing positions are inferred from publication order. Every position is populated and remains editable before import. Mark each new title as **Collection**, **Wishlist**, or **Skip**, or use the bulk selection buttons, then import the selected rows together. Existing ISBN/title matches are identified and are not duplicated.
-
-Open **Duplicates** and select **Run duplicate scan** to find works with two or more owned copies. Matching is intentionally independent of ISBN, binding, and edition, so hardcover, paperback, limited, first-edition, and reprint copies can appear together. Common edition wording and punctuation differences are normalized, and author word order is ignored. Wishlist and backlog entries are excluded because they are not owned copies. Click any result to correct its copy details, then select **Rerun scan**.
-
-An API key is not required, but Google may apply lower anonymous quotas. Add a restricted Google Books API key to `GOOGLE_BOOKS_API_KEY` in the Unraid template if Google searches regularly fall back to Open Library. The container requires outbound HTTPS access to:
-
-- `www.googleapis.com`
-- `openlibrary.org`
-- `books.google.com`
-- `books.googleusercontent.com`
-- `covers.openlibrary.org`
-- `api.hardcover.app` and `assets.hardcover.app` when Hardcover is enabled
-
-Book metadata and cover links come from the [Google Books API](https://developers.google.com/books/docs/v1/using), [Open Library Search and Covers APIs](https://openlibrary.org/developers/api), and optionally the [Hardcover GraphQL API](https://docs.hardcover.app/api/getting-started/).
-
-Goodreads is shown as unavailable rather than used as a cover or series source because it [stopped issuing public developer keys and is retiring its API](https://www.goodreads.com/group/show/8095-goodreads-developers), while its [current terms prohibit automated collection and data extraction](https://www.goodreads.com/about/terms). Hardcover is the supported Goodreads-style catalog replacement. To enable it:
-
-1. Create or sign in to a Hardcover account and copy the token from **Account Settings → Hardcover API**.
-2. Edit the BookVault container in Unraid.
-3. Add `HARDCOVER_API_TOKEN` as a masked variable and paste the complete token. BookVault accepts it with or without the `Bearer ` prefix.
-4. Apply the change to recreate the container. The token stays server-side and is never sent to the browser.
-
-Hardcover tokens expire annually. If Hardcover cover enrichment stops working, replace the token; Google Books and Open Library continue working without it.
-
-Authenticated book endpoints:
-
-- `GET /api/book-search?q=...&type=auto|title|isbn` searches the metadata providers.
-- `GET /api/series-search?q=...&provider=auto|hardcover|open_library` finds and positions the books in a series using the selected source.
-- `GET /api/settings` and `PUT /api/settings` read or update personal defaults and the active library's saved locations.
-- `GET /api/family` reads the active family; administrator-only `PUT /api/family` creates it or updates its membership.
-- `GET /api/books?q=...` lists personal books plus family-owned books and optionally searches title, author, ISBN, collection, series, or physical location.
-- `GET /api/books/duplicates` scans the visible owned collection for duplicate works across editions and bindings.
-- `POST /api/books` validates and stores a book for the signed-in user.
-- `POST /api/books/bulk` validates and imports up to 100 reviewed series books.
-- `PUT /api/books/:id` updates one of the signed-in user's books and reading status.
-- `DELETE /api/books/:id` permanently removes one of the signed-in user's books.
-- `PATCH /api/books/:id/status` moves one of the signed-in user's books between the collection, wishlist, and backlog.
-
-The requested human-readable defaults are in [`unraid-defaults.yaml`](unraid-defaults.yaml). Unraid does not read that YAML file; it imports [`unraid/book-vault.xml`](unraid/book-vault.xml). Unraid also saves a separate local copy for every created container and rewrites that copy when the container is edited.
-
-### Upgrade an existing development container
-
-Pull the newest image and refresh the locally saved template:
-
-```sh
-docker pull ghcr.io/hoovdizz/book-vault:development
-rm -f /boot/config/plugins/dockerMan/templates-user/my-book-vault.xml
-curl --fail --location \
-  https://raw.githubusercontent.com/hoovdizz/book-vault/development/unraid/book-vault.xml \
-  --output /boot/config/plugins/dockerMan/templates-user/my-book-vault.xml
-```
-
-Updating a template does not change an already-created container. Unraid keeps the existing container configuration when **Edit** is selected, even after the source template is replaced. If the Docker page still shows TCP port `3000`, fix the existing container:
-
-1. Select the BookVault icon and choose **Edit**.
-2. Find the existing Web UI port entry.
-3. Change both **Container Port** and **Host Port** from `3000` to `8130`. If Unraid does not allow the container-port field to be edited, remove that port entry and add a new **Port** entry with container port `8130`, host port `8130`, and TCP protocol.
-4. In advanced view, remove any `PORT=3000` variable and add or change `PORT` to `8130`.
-5. Confirm the WebUI field is `http://[IP]:[PORT:8130]`.
-6. Select **Apply** so Unraid recreates the container. The `/config` appdata mapping preserves the database.
-
-The current Docker icon URL is:
-
-```text
-https://raw.githubusercontent.com/hoovdizz/book-vault/development/public/book-vault-icon.png
-```
-
-The refreshed template supplies it automatically. If an existing container keeps its old or generic icon, open **Edit → Advanced View**, paste that address into **Icon URL**, select **Apply**, and refresh the Docker page. Browsers can also cache the favicon; a hard refresh loads the matching BookVault icon.
-
-Verify the published port from the terminal:
-
-```sh
-docker port book-vault
-```
-
-The result should include:
-
-```text
-8130/tcp -> 0.0.0.0:8130
-```
-
-Do not add a `--user` override: the entrypoint starts briefly as root to repair ownership of the dedicated `/config` mount and then drops to `PUID:PGID` before BookVault starts. The Unraid defaults are `99:100`, which appear on the host as `nobody:users`.
-
-Verify the host ownership after recreating the container:
-
-```sh
-stat -c '%U:%G (%u:%g)' /mnt/user/appdata/book-vault
-```
-
-The expected result is:
-
-```text
-nobody:users (99:100)
-```
-
-The following log output is normal and confirms the application started:
-
-```text
-(node:1) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-BookVault listening on http://0.0.0.0:8130
-```
-
-### Database permission error
-
-Versions before the ownership-fix entrypoint can stop with:
-
-```text
-Error: unable to open database file
-```
-
-Update the image and recreate the container using the steps above. The new entrypoint automatically makes the `/config` appdata directory writable without running the application itself as root. If the error remains, confirm that the mapping is exactly:
-
-```text
-/mnt/user/appdata/book-vault  ->  /config
-```
-
-and that `/mnt/user/appdata/book-vault` is on writable storage rather than a read-only remote share.
-
-### GHCR package access
-
-The image must be public for an anonymous Unraid pull. If Docker reports `unauthorized`, the package owner must perform this one-time GitHub setting:
-
-1. Open [BookVault package settings](https://github.com/users/hoovdizz/packages/container/book-vault/settings).
-2. Find **Danger Zone → Change package visibility**.
-3. Select **Public** and confirm `book-vault`.
-4. On Unraid, clear any stale registry session and pull again:
-
-   ```sh
-   docker logout ghcr.io 2>/dev/null || true
-   docker pull ghcr.io/hoovdizz/book-vault:development
-   ```
-
-If the package must remain private, create a GitHub classic personal access token with `read:packages`, then authenticate from the Unraid terminal:
-
-```sh
-export GHCR_USER='your-github-username'
-read -rsp 'GitHub package token: ' GHCR_TOKEN
-printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-unset GHCR_TOKEN
-docker pull ghcr.io/hoovdizz/book-vault:development
-```
-
-Do not put a GitHub token directly in the command line, XML template, or container variables.
-
-### Run from the Unraid terminal
-
-Development is currently the published install target:
+### Terminal installation
 
 ```sh
 docker pull ghcr.io/hoovdizz/book-vault:development
@@ -252,16 +132,76 @@ docker run -d \
   -e TZ=America/New_York \
   -e PUID=99 \
   -e PGID=100 \
-  -e ADMIN_EMAIL=admin@example.com \
-  -e ADMIN_PASSWORD='replace-with-a-long-password' \
+  -e ADMIN_NAME=bookvaultadmin \
+  -e ADMIN_EMAIL='admin@example.com' \
+  -e ADMIN_PASSWORD='replace-with-a-unique-long-password' \
   ghcr.io/hoovdizz/book-vault:development
 ```
 
-Use `:latest` only after the container changes have been merged into `main` and the `latest` image has been published.
+Do not add a Docker `--user` override. The entrypoint starts briefly as root only to repair ownership of the dedicated `/config` mount, then runs Book Vault as `PUID:PGID`. On Unraid, the defaults appear on the host as `nobody:users`.
+
+Verify:
+
+```sh
+docker port book-vault
+docker exec book-vault wget -qO- http://127.0.0.1:8130/api/health
+stat -c '%U:%G (%u:%g)' /mnt/user/appdata/book-vault
+```
+
+Expected results include:
+
+```text
+8130/tcp -> 0.0.0.0:8130
+{"status":"ok"}
+nobody:users (99:100)
+```
+
+The Node 22 `ExperimentalWarning` for built-in SQLite is informational. A successful startup also logs:
+
+```text
+BookVault listening on http://0.0.0.0:8130
+```
+
+### Upgrade an existing Unraid container
+
+Pull the image and refresh the locally stored template:
+
+```sh
+docker pull ghcr.io/hoovdizz/book-vault:development
+curl --fail --location \
+  https://raw.githubusercontent.com/hoovdizz/book-vault/development/unraid/book-vault.xml \
+  --output /boot/config/plugins/dockerMan/templates-user/my-book-vault.xml
+```
+
+Refreshing the XML does not overwrite an already-created container’s settings. Open the existing container’s **Edit** page to change its repository, variables, or port.
+
+If an older container still shows `3000/tcp`, remove that port entry and add TCP container port `8130` with host port `8130`. Remove any `PORT=3000` variable or change it to `8130`, then select **Apply**.
+
+If startup reports `unable to open database file`, verify the mapping is exactly:
+
+```text
+/mnt/user/appdata/book-vault -> /config
+```
+
+Recreating the current container repairs `/config` ownership before dropping to UID `99`, GID `100`.
+
+### GHCR “unauthorized”
+
+Anonymous Unraid pulls require the GHCR package to be public. Package owners can change visibility in the [Book Vault package settings](https://github.com/users/hoovdizz/packages/container/book-vault/settings).
+
+For a deliberately private package, log in without putting a token in the XML or shell history:
+
+```sh
+export GHCR_USER='your-github-username'
+read -rsp 'GitHub package token: ' GHCR_TOKEN
+printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+unset GHCR_TOKEN
+docker pull ghcr.io/hoovdizz/book-vault:development
+```
 
 ## Pull main or development
 
-Git branches:
+Source branches:
 
 ```sh
 git clone --branch main https://github.com/hoovdizz/book-vault.git
@@ -271,66 +211,109 @@ git clone --branch development https://github.com/hoovdizz/book-vault.git book-v
 Container images:
 
 ```sh
+# Main branch
 docker pull ghcr.io/hoovdizz/book-vault:latest
+
+# Development branch
 docker pull ghcr.io/hoovdizz/book-vault:development
 ```
 
-The GitHub Actions workflow publishes `main` as `latest` and `development` as `development` after each push.
+The publish workflow maps `main` to `latest` and `development` to `development`.
 
-## Add users
+## First-use workflow
 
-Sign in as an administrator, open **Settings**, and use the **Users** form. New accounts may be regular users or administrators. Passwords are salted and hashed asynchronously with scrypt. Sessions use hashed server-side tokens and `HttpOnly`, `SameSite=Strict` cookies that expire after `SESSION_DAYS`.
+1. Sign in with the administrator credentials entered during installation.
+2. Open **Settings** and create the household location hierarchy and defaults.
+3. Add adults, child profiles, viewers, or household administrators directly, or create a controlled one-time invitation.
+4. Open **Collection → Add book** for a single lookup, or **Batch scan** for continuous camera/USB/Bluetooth entry.
+5. Open **Administration** to configure provider order, define custom fields, import existing data, and create the first backup.
 
-### Share a family collection
+Camera access is requested only when a scanner opens. Live camera scanning normally requires HTTPS; the photo-based scanner remains available when the browser cannot grant a live stream. The installed PWA has the same catalog and scanner workflows as the desktop view.
 
-After creating the user accounts:
+Location labels are created under **Settings → Hierarchical locations**. Select a batch destination from the hierarchy or scan its Book Vault QR label before scanning the books going there.
 
-1. Open **Settings → Family library** as an administrator.
-2. Enter a family name and select the accounts that should share the physical collection.
-3. Select **Create family** or **Update family**.
+## Metadata and covers
 
-Every selected member sees all books marked **Collection** by any family member. Wishlist and Backlog books remain visible only to the account that added them. Reading state is stored separately for each member, so one person can mark a shared book **Read** while another still sees it as **Unread**. Saved physical location names are shared across the family, but each member keeps their own default location, binding, and condition.
+Administrators choose the lookup order under **Administration → Metadata providers**. Google Books and Open Library can fill each other’s gaps; manual entry always remains available. Provider errors never block a manual save.
+
+Important edition fields retain provider provenance, lookup dates, source record IDs, original ISBNs, refresh dates, and manual-override markers. Provider refreshes skip manually overridden fields. Selected external covers are validated and cached below `/config/covers`; manual uploads are limited to 5 MB and validated from their actual JPEG, PNG, GIF, or WebP bytes.
+
+The quality dashboard reports missing covers, ISBNs, authors, suspicious dates, duplicate editions, unknown series positions, and incomplete records. Metadata-refresh and cover-backfill jobs are limited, tracked, and visible in the administrator area.
+
+Outbound provider requests contain only the lookup query. Telemetry is disabled.
+
+## Backups, restore, import, and export
+
+Household administrators can:
+
+- create and download a consistent backup archive containing SQLite and cached covers;
+- schedule `daily@HH:MM` backups and configure retention;
+- inspect last-success status and run `PRAGMA integrity_check`;
+- preview a restore, review counts and cover files, type an explicit confirmation, and stage it for the next restart;
+- export catalog CSV, household JSON, personal reading JSON, and loan-history CSV;
+- dry-run CSV imports, edit column mappings, review errors/duplicates, and preserve unknown columns in the import report.
+
+A restore always creates a pre-restore safety backup first. Never interrupt a container while it is applying a staged restore.
+
+## Security model
+
+- Passwords use salted asynchronous scrypt hashes.
+- Session bearer values are random, stored only as hashes, expire server-side, and use `HttpOnly; SameSite=Strict` cookies.
+- Public registration and telemetry are disabled.
+- Every protected action resolves the user and household on the server; client-side role values are not trusted.
+- Child and viewer permissions are enforced server-side.
+- Personal private notes are omitted from other members’ responses and household exports.
+- Private gifts are hidden from their intended recipient.
+- Administrator changes, backup/restore actions, account changes, loans, metadata jobs, and other sensitive actions are audited without passwords, tokens, hashes, or private notes.
+- Request bodies, imports, uploads, log details, provider rates, and login attempts are bounded.
+- CSP, origin checks, security headers, cover-host validation, and household-scoped queries are enabled.
+- Legacy `/api/books`, `/api/family`, and `/api/settings` routes are disabled in production; the normalized APIs are the default.
+
+For remote access, place Book Vault behind a trusted HTTPS reverse proxy. Set `TRUST_PROXY=true` only when direct client access to the application port is blocked and the proxy controls `X-Forwarded-Proto`.
+
+## Performance benchmark
+
+The schema includes indexes for 25,000 works, 35,000 editions, 50,000 copies, provider identifiers, ISBNs, locations, reading histories, active loans, edition counts, and list entries. Catalog responses use server pagination and never send the complete household library to every view.
+
+Run the repeatable target-size benchmark:
+
+```sh
+npm run benchmark
+```
+
+It creates a temporary database, seeds 25,000 works, 35,000 editions, and 50,000 copies, measures warm catalog search and duplicate lookup, prints JSON, and removes its temporary database. Set `BENCHMARK_DATABASE_PATH` to retain a new benchmark database; the script refuses to overwrite an existing file.
+
+Reference validation on a Windows development machine produced a warm-search p95 below 500 ms at the target size. Storage, CPU, filesystem, and concurrent provider work affect results.
 
 ## Local development
 
-Requirements: Node.js 22 or newer (the server uses Node's built-in SQLite module).
+Node.js 22 or later is required.
 
 ```sh
 npm ci
-npm run dev
-```
-
-Vite serves the front end during UI development. For a production-style local run:
-
-```sh
+npm test
+npm run lint
 npm run build
-npm start
 ```
 
-By default this creates `data/book-vault.sqlite` and listens on `http://localhost:8130`. A new database requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables.
-
-PowerShell example:
+Run a production-style local server:
 
 ```powershell
 $env:ADMIN_EMAIL = "admin@example.com"
-$env:ADMIN_PASSWORD = "replace-with-a-long-password"
+$env:ADMIN_PASSWORD = "replace-with-a-unique-long-password"
 npm start
 ```
 
-Docker Compose defaults are in [`docker-compose.yml`](docker-compose.yml):
+Or use Docker Compose after setting `ADMIN_EMAIL` and `ADMIN_PASSWORD` in the environment or an uncommitted `.env`:
 
 ```sh
 docker compose up -d --build
 ```
 
-Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in the shell or a local `.env` file before running Compose. Files ending in `.local` are ignored by Git; never commit credentials.
-
-## Security
-
-Login attempts are rate-limited, request and credential sizes are bounded, security headers and a Content Security Policy are enabled, and the service runs as a non-root container user. The publish workflow pins third-party actions to commit SHAs, audits dependencies, blocks images with fixable high/critical Trivy findings, and attaches SBOM/provenance attestations. Put BookVault behind an HTTPS reverse proxy before exposing it outside a trusted network.
-
-Upgrading from the original authentication implementation invalidates existing login sessions; user accounts remain intact.
-
 ## Health check
 
-`GET /api/health` returns `{"status":"ok"}` and is used by the container health check.
+`GET /api/health` returns:
+
+```json
+{"status":"ok"}
+```

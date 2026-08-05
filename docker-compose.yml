@@ -23,3 +23,4 @@ services:
       ADMIN_EMAIL: "${ADMIN_EMAIL:?Set ADMIN_EMAIL in your environment}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in your environment}"
       SESSION_DAYS: "30"
+      TRUST_PROXY: "${TRUST_PROXY:-false}"

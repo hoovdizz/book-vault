@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/auth';
 import { BookBinding, BookCondition, BookFormat, BookSearchResult, CoverOption } from '@/types/book';
-import { LibrarySettings } from '@/types/settings';
 import { bindingLabels, conditionLabels } from '@/lib/book-copy';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -25,11 +24,32 @@ import IsbnScannerDialog from '@/components/IsbnScannerDialog';
 
 type SearchType = 'auto' | 'title' | 'isbn';
 type Providers = {
-  googleBooks: 'available' | 'unavailable';
-  openLibrary: 'available' | 'unavailable';
+  googleBooks: 'available' | 'unavailable' | 'disabled';
+  openLibrary: 'available' | 'unavailable' | 'disabled';
   hardcover: 'available' | 'unavailable' | 'disabled';
 };
 type SearchResponse = { results: BookSearchResult[]; providers: Providers };
+type DuplicateWarning = {
+  matchType: string;
+  work: { id: string; title: string; author: string };
+  edition: {
+    id: string;
+    isbn10: string | null;
+    isbn13: string | null;
+    label: string | null;
+    binding: string | null;
+    coverUrl: string | null;
+  };
+  copyCount: number;
+  copies: {
+    id: string;
+    owner: { id: string | null; name: string };
+    format: string;
+    location: string | null;
+    loan: { id: string; status: string; dueAt: string | null } | null;
+  }[];
+  lists: { id: string; type: string; requestedBy: { id: string; name: string } }[];
+};
 
 type Draft = {
   title: string;
@@ -51,11 +71,26 @@ type Draft = {
   binding: BookBinding | '';
   edition: string;
   storageLocation: string;
+  locationId: string;
   conditionGrade: BookCondition | '';
   conditionNotes: string;
   loanedOut: boolean;
   loanedTo: string;
   loanedAt: string;
+  scope: 'personal' | 'household';
+  priority: '' | 'low' | 'medium' | 'high';
+  expectedPrice: string;
+  notes: string;
+  giftPrivate: boolean;
+  intendedRecipientId: string;
+  ownerUserId: string;
+  copyCount: string;
+  purchaseDate: string;
+  purchasePrice: string;
+  purchaseCurrency: string;
+  purchaseSource: string;
+  customBarcode: string;
+  copyNotes: string;
 };
 
 const emptyDraft: Draft = {
@@ -78,11 +113,26 @@ const emptyDraft: Draft = {
   binding: '',
   edition: '',
   storageLocation: '',
+  locationId: '',
   conditionGrade: '',
   conditionNotes: '',
   loanedOut: false,
   loanedTo: '',
   loanedAt: '',
+  scope: 'personal',
+  priority: '',
+  expectedPrice: '',
+  notes: '',
+  giftPrivate: false,
+  intendedRecipientId: '',
+  ownerUserId: '',
+  copyCount: '1',
+  purchaseDate: '',
+  purchasePrice: '',
+  purchaseCurrency: 'USD',
+  purchaseSource: '',
+  customBarcode: '',
+  copyNotes: '',
 };
 
 const formatLabels: Record<BookFormat, string> = {
@@ -161,31 +211,41 @@ export default function AddBookDialog({
   const [searched, setSearched] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [scannerOpen, setScannerOpen] = useState(false);
-  const { data: settingsData } = useQuery({
-    queryKey: ['settings'],
-    queryFn: () => api<{ settings: LibrarySettings }>('/api/settings'),
+  const [duplicateWarnings, setDuplicateWarnings] = useState<DuplicateWarning[]>([]);
+  const [duplicateAction, setDuplicateAction] = useState('');
+  const { data: householdData } = useQuery({
+    queryKey: ['household'],
+    queryFn: () => api<{
+      household: { defaults: { locationId: string | null; binding: string; condition: string } };
+      members: { id: number; name: string; disabled: boolean }[];
+      permissions: { manageHousehold: boolean };
+    }>('/api/household'),
     enabled: open,
   });
-  const settings = settingsData?.settings;
+  const { data: locationsData } = useQuery({
+    queryKey: ['locations'],
+    queryFn: () => api<{ locations: { id: string; breadcrumb: string; archived: boolean }[] }>('/api/locations?archived=false'),
+    enabled: open,
+  });
 
   function withDefaults(value: Draft): Draft {
     return {
       ...value,
-      binding: value.binding || settings?.defaultBinding || '',
-      storageLocation: value.storageLocation || (isWishlist ? '' : settings?.defaultLocation || ''),
-      conditionGrade: value.conditionGrade || (isWishlist ? '' : settings?.defaultCondition || ''),
+      binding: value.binding || householdData?.household.defaults.binding || '',
+      locationId: value.locationId || (isWishlist ? '' : householdData?.household.defaults.locationId || ''),
+      conditionGrade: value.conditionGrade || (isWishlist ? '' : householdData?.household.defaults.condition || ''),
     };
   }
 
   useEffect(() => {
-    if (!open || !settings) return;
+    if (!open || !householdData) return;
     setDraft(current => ({
       ...current,
-      binding: current.binding || settings.defaultBinding,
-      storageLocation: current.storageLocation || (isWishlist ? '' : settings.defaultLocation),
-      conditionGrade: current.conditionGrade || (isWishlist ? '' : settings.defaultCondition),
+      binding: current.binding || householdData.household.defaults.binding,
+      locationId: current.locationId || (isWishlist ? '' : householdData?.household.defaults.locationId || ''),
+      conditionGrade: current.conditionGrade || (isWishlist ? '' : householdData.household.defaults.condition),
     }));
-  }, [open, settings, isWishlist]);
+  }, [open, isWishlist, householdData]);
 
   const sourceMessage = useMemo(() => {
     if (!providers) return '';
@@ -195,8 +255,8 @@ export default function AddBookDialog({
     if (providers.openLibrary === 'unavailable' && providers.googleBooks === 'available') {
       return 'Open Library cover enrichment was unavailable; Google Books results are shown.';
     }
-    const hardcover = providers.hardcover === 'available' ? ' Hardcover supplies additional cover choices.' : '';
-    return `Google Books results are prioritized and Open Library supplies fallback metadata and cover editions.${hardcover}`;
+    const hardcover = providers.hardcover === 'available' ? ' Hardcover supplied additional cover choices.' : '';
+    return `Results use the metadata-provider order configured by your administrator, with another enabled provider used when needed.${hardcover}`;
   }, [providers]);
 
   function reset() {
@@ -210,6 +270,8 @@ export default function AddBookDialog({
     setSearched(false);
     setDraft(withDefaults({ ...emptyDraft }));
     setScannerOpen(false);
+    setDuplicateWarnings([]);
+    setDuplicateAction('');
   }
 
   function handleOpenChange(next: boolean) {
@@ -273,6 +335,7 @@ export default function AddBookDialog({
       binding: '',
       edition: '',
       storageLocation: '',
+      locationId: '',
       conditionGrade: '',
       conditionNotes: '',
       loanedOut: false,
@@ -309,17 +372,46 @@ export default function AddBookDialog({
     event.preventDefault();
     setSaving(true);
     try {
-      await api('/api/books', {
+      if (!duplicateAction) {
+        const duplicateReview = await api<{ warnings: DuplicateWarning[] }>('/api/catalog/duplicates', {
+          method: 'POST',
+          body: JSON.stringify(draft),
+        });
+        if (duplicateReview.warnings.length) {
+          setDuplicateWarnings(duplicateReview.warnings);
+          return;
+        }
+      }
+      const created = await api<{ created: { type: string; id: number }[] }>('/api/catalog', {
         method: 'POST',
         body: JSON.stringify({
           ...draft,
           status: destination,
           publishedYear: draft.publishedYear || null,
           pageCount: draft.pageCount || null,
+          forceNewEdition: duplicateAction === 'add_different_edition',
+          moveWishlistToOwned: duplicateAction === 'move_wishlist_to_owned',
+          ownerUserId: draft.ownerUserId && draft.ownerUserId !== 'household' ? draft.ownerUserId : undefined,
+          householdOwned: draft.ownerUserId === 'household',
+          copyCount: Number(draft.copyCount || 1),
         }),
       });
-      await queryClient.invalidateQueries({ queryKey: ['books'] });
-      await queryClient.invalidateQueries({ queryKey: ['book-duplicates'] });
+      if (draft.loanedOut && destination === 'owned') {
+        const physicalCopy = created.created.find(item => item.type === 'copy');
+        if (physicalCopy) {
+          await api('/api/loans', {
+            method: 'POST',
+            body: JSON.stringify({
+              copyId: physicalCopy.id,
+              externalName: draft.loanedTo || 'Unspecified borrower',
+              checkoutAt: draft.loanedAt || undefined,
+            }),
+          });
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      await queryClient.invalidateQueries({ queryKey: ['catalog-duplicates'] });
+      await queryClient.invalidateQueries({ queryKey: ['catalog-series'] });
       toast.success(`Added “${draft.title}” to your ${isWishlist ? 'wishlist' : 'collection'}`);
       handleOpenChange(false);
     } catch (error) {
@@ -444,6 +536,67 @@ export default function AddBookDialog({
           </div>
         ) : (
           <form onSubmit={saveBook} className="space-y-6">
+            {duplicateWarnings.length > 0 && !duplicateAction && (
+              <section className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4" aria-live="polite">
+                <h3 className="font-heading font-semibold">This book may already be in the household</h3>
+                {duplicateWarnings.slice(0, 3).map(warning => (
+                  <div key={warning.edition.id} className="mt-3 flex gap-3 rounded-md bg-background/70 p-3">
+                    <div className="h-20 w-14 flex-none overflow-hidden rounded bg-muted">
+                      {warning.edition.coverUrl && (
+                        <img src={warning.edition.coverUrl} alt="" className="h-full w-full object-cover" />
+                      )}
+                    </div>
+                    <div className="min-w-0 text-sm">
+                      <p className="font-medium">{warning.work.title}</p>
+                      <p className="text-muted-foreground">
+                        {[warning.edition.binding, warning.edition.label, warning.edition.isbn13 || warning.edition.isbn10]
+                          .filter(Boolean).join(' · ')}
+                      </p>
+                      <p>{warning.copyCount} owned {warning.copyCount === 1 ? 'copy' : 'copies'}</p>
+                      {warning.copies.map(copy => (
+                        <p key={copy.id} className="text-xs text-muted-foreground">
+                          {copy.owner.name} · {copy.format}{copy.location ? ` · ${copy.location}` : ''}{copy.loan ? ' · currently loaned' : ''}
+                        </p>
+                      ))}
+                      {warning.lists.map(list => (
+                        <p key={list.id} className="text-xs text-muted-foreground">
+                          {list.requestedBy.name}: {list.type}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button type="button" size="sm" onClick={() => setDuplicateAction('add_another_copy')}>
+                    Add another copy
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setDuplicateAction('add_different_edition')}>
+                    Add different edition
+                  </Button>
+                  {duplicateWarnings.some(warning => warning.lists.some(list => list.type === 'wishlist'))
+                    && destination === 'owned' && (
+                      <Button type="button" size="sm" variant="outline" onClick={() => setDuplicateAction('move_wishlist_to_owned')}>
+                        Move wishlist item to owned
+                      </Button>
+                    )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      handleOpenChange(false);
+                      window.history.pushState({}, '', `/collection?q=${encodeURIComponent(duplicateWarnings[0].work.title)}`);
+                      window.dispatchEvent(new PopStateEvent('popstate'));
+                    }}
+                  >
+                    View existing
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setDuplicateWarnings([])}>
+                    Cancel
+                  </Button>
+                </div>
+              </section>
+            )}
             <div className="grid gap-6 md:grid-cols-[220px_1fr]">
               <section className="space-y-3">
                 <div>
@@ -511,6 +664,46 @@ export default function AddBookDialog({
                   <Label htmlFor="book-series-number">Series position</Label>
                   <Input id="book-series-number" maxLength={30} placeholder="e.g. 1 or 1.5" value={draft.seriesNumber} onChange={event => update('seriesNumber', event.target.value)} />
                 </div>
+                {isWishlist && (
+                  <>
+                    <div className="sm:col-span-2 border-t border-border pt-2">
+                      <h3 className="font-heading font-semibold">Wishlist request</h3>
+                      <p className="mt-1 text-xs text-muted-foreground">Purchasing details belong to this request, not to the general work record.</p>
+                    </div>
+                    <div>
+                      <Label htmlFor="wishlist-scope">Visibility</Label>
+                      <select id="wishlist-scope" value={draft.scope} onChange={event => update('scope', event.target.value as Draft['scope'])} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+                        <option value="personal">Personal</option>
+                        <option value="household">Household</option>
+                      </select>
+                    </div>
+                    <div>
+                      <Label htmlFor="wishlist-priority">Priority</Label>
+                      <select id="wishlist-priority" value={draft.priority} onChange={event => update('priority', event.target.value as Draft['priority'])} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+                        <option value="">Not set</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+                      </select>
+                    </div>
+                    <div>
+                      <Label htmlFor="wishlist-price">Expected price</Label>
+                      <Input id="wishlist-price" type="number" min="0" step="0.01" value={draft.expectedPrice} onChange={event => update('expectedPrice', event.target.value)} />
+                    </div>
+                    <div>
+                      <Label htmlFor="wishlist-recipient">Intended recipient</Label>
+                      <select id="wishlist-recipient" value={draft.intendedRecipientId} onChange={event => update('intendedRecipientId', event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+                        <option value="">No recipient</option>
+                        {(householdData?.members || []).filter(member => !member.disabled).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="wishlist-notes">Purchase or gift notes</Label>
+                      <Textarea id="wishlist-notes" maxLength={3000} rows={3} value={draft.notes} onChange={event => update('notes', event.target.value)} />
+                    </div>
+                    <label className="sm:col-span-2 flex items-center gap-2 rounded-md border border-border p-3 text-sm">
+                      <input type="checkbox" checked={draft.giftPrivate} onChange={event => update('giftPrivate', event.target.checked)} />
+                      Hide this gift entry from its intended recipient until revealed
+                    </label>
+                  </>
+                )}
                 <div className="sm:col-span-2 border-t border-border pt-2">
                   <h3 className="font-heading font-semibold">Copy details</h3>
                   <p className="mt-1 text-xs text-muted-foreground">Describe this specific copy so other editions remain distinct.</p>
@@ -530,17 +723,22 @@ export default function AddBookDialog({
                   <>
                     <div className="sm:col-span-2">
                       <Label htmlFor="book-storage-location">Physical location</Label>
-                      <Input
+                      <select
                         id="book-storage-location"
-                        list="book-storage-locations"
-                        maxLength={150}
-                        placeholder="e.g. Bookshelf in den or Tote in den"
-                        value={draft.storageLocation}
-                        onChange={event => update('storageLocation', event.target.value)}
-                      />
-                      <datalist id="book-storage-locations">
-                        {(settings?.locations || []).map(value => <option key={value} value={value} />)}
-                      </datalist>
+                        value={draft.locationId}
+                        onChange={event => update('locationId', event.target.value)}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="">No physical location</option>
+                        {(locationsData?.locations || []).map(location => (
+                          <option key={location.id} value={location.id}>{location.breadcrumb}</option>
+                        ))}
+                      </select>
+                      {!locationsData?.locations.length && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Add hierarchical rooms, shelves, or bins in Settings.
+                        </p>
+                      )}
                     </div>
                     <div>
                       <Label htmlFor="book-condition">Condition</Label>
@@ -548,6 +746,41 @@ export default function AddBookDialog({
                         <option value="">Not set</option>
                         {(Object.entries(conditionLabels) as [BookCondition, string][]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                       </select>
+                    </div>
+                    <div>
+                      <Label htmlFor="book-copy-owner">Copy owner</Label>
+                      <select id="book-copy-owner" value={draft.ownerUserId} onChange={event => update('ownerUserId', event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+                        <option value="">My account</option>
+                        {householdData?.permissions.manageHousehold && <option value="household">Shared household copy</option>}
+                        {householdData?.permissions.manageHousehold && (householdData.members || []).filter(member => !member.disabled).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <Label htmlFor="book-copy-count">Number of copies per selected format</Label>
+                      <Input id="book-copy-count" type="number" min="1" max="100" value={draft.copyCount} onChange={event => update('copyCount', event.target.value)} />
+                    </div>
+                    <div>
+                      <Label htmlFor="book-purchase-date">Purchase date</Label>
+                      <Input id="book-purchase-date" type="date" value={draft.purchaseDate} onChange={event => update('purchaseDate', event.target.value)} />
+                    </div>
+                    <div>
+                      <Label htmlFor="book-purchase-price">Purchase price</Label>
+                      <div className="flex gap-2">
+                        <Input id="book-purchase-price" type="number" min="0" step="0.01" value={draft.purchasePrice} onChange={event => update('purchasePrice', event.target.value)} />
+                        <Input aria-label="Purchase currency" maxLength={3} className="w-20 uppercase" value={draft.purchaseCurrency} onChange={event => update('purchaseCurrency', event.target.value.toUpperCase())} />
+                      </div>
+                    </div>
+                    <div>
+                      <Label htmlFor="book-purchase-source">Purchase source</Label>
+                      <Input id="book-purchase-source" maxLength={150} value={draft.purchaseSource} onChange={event => update('purchaseSource', event.target.value)} />
+                    </div>
+                    <div>
+                      <Label htmlFor="book-custom-barcode">Custom copy barcode</Label>
+                      <Input id="book-custom-barcode" maxLength={100} value={draft.customBarcode} onChange={event => update('customBarcode', event.target.value)} />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="book-copy-notes">Copy notes</Label>
+                      <Textarea id="book-copy-notes" maxLength={2000} rows={2} value={draft.copyNotes} onChange={event => update('copyNotes', event.target.value)} />
                     </div>
                     <div className="flex items-center justify-between gap-4 rounded-md border border-border px-3 py-2">
                       <div>
@@ -600,7 +833,7 @@ export default function AddBookDialog({
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setStep('search')}>Back to search</Button>
-              <Button type="submit" disabled={saving}>
+              <Button type="submit" disabled={saving || (duplicateWarnings.length > 0 && !duplicateAction)}>
                 {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Add to {isWishlist ? 'wishlist' : 'collection'}
               </Button>

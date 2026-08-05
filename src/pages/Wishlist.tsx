@@ -1,12 +1,12 @@
-import { useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
-import { Heart, Plus, ArrowRight, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowRight, Heart, Loader2, Plus } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import BookCard from '@/components/BookCard';
 import AddBookDialog from '@/components/AddBookDialog';
 import EditBookDialog from '@/components/EditBookDialog';
 import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
+import { fetchCatalog } from '@/lib/catalog';
 import { api } from '@/lib/auth';
 import { UserBook } from '@/types/book';
 
@@ -16,29 +16,37 @@ export default function Wishlist() {
   const [movingBookId, setMovingBookId] = useState<string | null>(null);
   const [editingBook, setEditingBook] = useState<UserBook | null>(null);
   const { data, isLoading, error } = useQuery({
-    queryKey: ['books'],
-    queryFn: () => api<{ books: UserBook[] }>('/api/books'),
+    queryKey: ['catalog', 'wishlist'],
+    queryFn: () => fetchCatalog({ status: ['wishlist'], pageSize: 100, sort: 'dateAdded', direction: 'desc' }),
   });
-  const books = useMemo(() => data?.books || [], [data?.books]);
-  const wishlistBooks = books.filter(book => book.status === 'wishlist');
-  const collections = useMemo(
-    () => [...new Set(books.map(item => item.book.collection).filter((value): value is string => Boolean(value)))].sort(),
-    [books],
-  );
-  const seriesNames = useMemo(
-    () => [...new Set(books.map(item => item.book.series).filter((value): value is string => Boolean(value)))].sort(),
-    [books],
-  );
+  const { data: collectionsData } = useQuery({
+    queryKey: ['collections'],
+    queryFn: () => api<{ collections: { name: string }[] }>('/api/collections'),
+  });
+  const { data: seriesData } = useQuery({
+    queryKey: ['catalog-series'],
+    queryFn: () => api<{ series: { name: string }[] }>('/api/catalog/series'),
+  });
+  const wishlistBooks = data?.items || [];
 
   async function handleMoveToCollection(book: UserBook) {
     setMovingBookId(book.id);
     try {
-      await api(`/api/books/${book.id}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'owned' }),
+      await api('/api/catalog', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...book.book,
+          title: book.book.title,
+          author: book.book.author,
+          isbn: book.book.isbn,
+          status: 'owned',
+          formats: book.formats.length ? book.formats : ['physical'],
+          moveWishlistToOwned: true,
+        }),
       });
-      await queryClient.invalidateQueries({ queryKey: ['books'] });
-      toast.success(`Moved “${book.book.title}” to your collection`);
+      await queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      await queryClient.invalidateQueries({ queryKey: ['catalog-duplicates'] });
+      toast.success(`Moved “${book.book.title}” to the collection`);
     } catch (moveError) {
       toast.error(moveError instanceof Error ? moveError.message : 'Could not move book');
     } finally {
@@ -48,76 +56,57 @@ export default function Wishlist() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground">Wishlist</h1>
-          <p className="text-muted-foreground mt-1">{wishlistBooks.length} books you'd love to own</p>
+          <h1 className="text-3xl font-heading font-bold">Wishlist</h1>
+          <p className="mt-1 text-muted-foreground">{data?.pagination.total || 0} personal or household requests</p>
         </div>
-        <Button
-          type="button"
-          className="gradient-warm text-primary-foreground gap-2 w-fit"
-          onClick={() => setShowAddBook(true)}
-        >
-          <Plus className="h-4 w-4" />
-          Add to Wishlist
+        <Button type="button" className="gradient-warm w-fit gap-2 text-primary-foreground" onClick={() => setShowAddBook(true)}>
+          <Plus className="h-4 w-4" />Add to wishlist
         </Button>
       </div>
 
       {isLoading ? (
-        <div className="py-16 text-center text-muted-foreground">Loading your wishlist…</div>
+        <div className="py-16 text-center text-muted-foreground">Loading the wishlist…</div>
       ) : error ? (
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-6 text-center text-destructive">
-          {error instanceof Error ? error.message : 'Could not load your wishlist'}
+          {error instanceof Error ? error.message : 'Could not load the wishlist'}
         </div>
-      ) : wishlistBooks.length > 0 ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {wishlistBooks.map((ub, i) => (
-            <motion.div
-              key={ub.id}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-              className="relative"
-            >
-              <BookCard userBook={ub} onSelect={setEditingBook} />
-              <div className="mt-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-xs gap-1 border-border text-foreground hover:bg-accent hover:text-accent-foreground"
-                  disabled={movingBookId === ub.id}
-                  onClick={() => handleMoveToCollection(ub)}
-                >
-                  {movingBookId === ub.id
-                    ? <Loader2 className="h-3 w-3 animate-spin" />
-                    : <ArrowRight className="h-3 w-3" />}
-                  Move to Collection
-                </Button>
-              </div>
-            </motion.div>
+      ) : wishlistBooks.length ? (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {wishlistBooks.map(book => (
+            <div key={book.id} className="relative">
+              <BookCard userBook={book} onSelect={setEditingBook} />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2 w-full gap-1 text-xs"
+                disabled={movingBookId === book.id}
+                onClick={() => handleMoveToCollection(book)}
+              >
+                {movingBookId === book.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowRight className="h-3 w-3" />}
+                Mark purchased and add copy
+              </Button>
+            </div>
           ))}
         </div>
       ) : (
-        <div className="text-center py-16 text-muted-foreground">
-          <Heart className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-          <p className="text-lg font-heading">Your wishlist is empty</p>
-          <p className="text-sm mt-1">Search for books to add to your wishlist</p>
+        <div className="py-16 text-center text-muted-foreground">
+          <Heart className="mx-auto mb-3 h-12 w-12 opacity-30" />
+          <p className="text-lg font-heading">The visible wishlist is empty</p>
+          <p className="mt-1 text-sm">Private gift requests stay hidden from their intended recipient.</p>
         </div>
       )}
 
       <AddBookDialog
         open={showAddBook}
         onOpenChange={setShowAddBook}
-        collections={collections}
-        seriesNames={seriesNames}
+        collections={collectionsData?.collections.map(item => item.name) || []}
+        seriesNames={seriesData?.series.map(item => item.name) || []}
         destination="wishlist"
       />
-      <EditBookDialog
-        book={editingBook}
-        open={Boolean(editingBook)}
-        onOpenChange={open => { if (!open) setEditingBook(null); }}
-      />
+      <EditBookDialog book={editingBook} open={Boolean(editingBook)} onOpenChange={open => { if (!open) setEditingBook(null); }} />
     </div>
   );
 }

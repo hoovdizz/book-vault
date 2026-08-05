@@ -118,14 +118,24 @@ export default function AddSeriesDialog({
     }
     setImporting(true);
     try {
-      const response = await api<{ books: UserBook[]; skipped: { title: string }[] }>('/api/books/bulk', {
+      const review = await api<{ results: { index: number; duplicates: unknown[] }[] }>('/api/catalog/batch', {
         method: 'POST',
-        body: JSON.stringify({ books: selected }),
+        body: JSON.stringify({ mode: 'review', entries: selected }),
       });
-      await queryClient.invalidateQueries({ queryKey: ['books'] });
-      await queryClient.invalidateQueries({ queryKey: ['book-duplicates'] });
-      const skipped = response.skipped.length ? `; ${response.skipped.length} already existed` : '';
-      toast.success(`Added ${response.books.length} series book${response.books.length === 1 ? '' : 's'}${skipped}`);
+      const reviewed = selected.map((entry, index) => ({
+        ...entry,
+        duplicateAction: review.results.find(result => result.index === index)?.duplicates.length ? 'cancel' : undefined,
+      }));
+      const response = await api<{ results: { state: string; skipped?: boolean }[] }>('/api/catalog/batch', {
+        method: 'POST',
+        body: JSON.stringify({ mode: 'save', entries: reviewed }),
+      });
+      await queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      await queryClient.invalidateQueries({ queryKey: ['catalog-duplicates'] });
+      await queryClient.invalidateQueries({ queryKey: ['catalog-series'] });
+      const added = response.results.filter(item => item.state === 'success' && !item.skipped).length;
+      const skipped = response.results.length - added;
+      toast.success(`Added ${added} series book${added === 1 ? '' : 's'}${skipped ? `; ${skipped} already existed or were skipped` : ''}`);
       close(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not import series');

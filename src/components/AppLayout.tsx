@@ -1,4 +1,8 @@
-import { Library, ListTodo, Heart, Layers, BarChart3, Settings, Search, Copy } from 'lucide-react';
+import { FormEvent, useEffect, useState } from 'react';
+import { Library, ListTodo, Heart, Layers, BarChart3, Settings, Search, Copy, Handshake, ShieldCheck } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { useTheme } from 'next-themes';
+import { api, useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 import { Link, usePathname } from '@/lib/router';
 
@@ -9,10 +13,31 @@ const navItems = [
   { to: '/wishlist', icon: Heart, label: 'Wishlist' },
   { to: '/series', icon: Layers, label: 'Series' },
   { to: '/duplicates', icon: Copy, label: 'Duplicates' },
+  { to: '/loans', icon: Handshake, label: 'Loans' },
+  { to: '/statistics', icon: BarChart3, label: 'Statistics' },
+  { to: '/admin', icon: ShieldCheck, label: 'Admin' },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { user } = useAuth();
+  const { setTheme } = useTheme();
+  const [search, setSearch] = useState('');
+  const { data: preferenceData } = useQuery({
+    queryKey: ['preferences'],
+    queryFn: () => api<{ preferences: { theme: string } }>('/api/preferences'),
+  });
+  useEffect(() => {
+    if (preferenceData?.preferences.theme) setTheme(preferenceData.preferences.theme);
+  }, [preferenceData, setTheme]);
+  const visibleNavItems = navItems.filter(item => item.to !== '/admin' || user?.role === 'admin');
+
+  function submitSearch(event: FormEvent) {
+    event.preventDefault();
+    const destination = `/collection${search.trim() ? `?q=${encodeURIComponent(search.trim())}` : ''}`;
+    window.history.pushState({}, '', destination);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -24,18 +49,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="px-3 py-4">
-          <div className="relative mb-4">
+          <form className="relative mb-4" onSubmit={submitSearch}>
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-sidebar-foreground/50" />
             <input
               type="text"
+              value={search}
+              onChange={event => setSearch(event.target.value)}
               placeholder="Search books..."
+              aria-label="Search household catalog"
               className="w-full pl-9 pr-3 py-2 rounded-md bg-sidebar-accent text-sidebar-foreground text-sm placeholder:text-sidebar-foreground/40 border border-sidebar-border focus:outline-none focus:ring-1 focus:ring-sidebar-primary"
             />
-          </div>
+          </form>
         </div>
 
         <nav className="flex-1 px-3 space-y-1">
-          {navItems.map(({ to, icon: Icon, label }) => (
+          {visibleNavItems.map(({ to, icon: Icon, label }) => (
             <Link
               key={to}
               href={to}
@@ -72,7 +100,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <nav className="flex px-2 pb-2 gap-1 overflow-x-auto">
-          {navItems.map(({ to, icon: Icon, label }) => (
+          {visibleNavItems.map(({ to, icon: Icon, label }) => (
             <Link
               key={to}
               href={to}

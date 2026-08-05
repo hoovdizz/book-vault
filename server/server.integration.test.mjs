@@ -10,12 +10,15 @@ process.env.DATABASE_PATH = join(testDirectory, "book-vault.sqlite");
 process.env.ADMIN_NAME = "Integration Admin";
 process.env.ADMIN_EMAIL = "integration@bookvault.local";
 process.env.ADMIN_PASSWORD = "integrationpassword";
+process.env.ENABLE_LEGACY_API = "true";
 
 let server;
 let db;
 let baseUrl;
 let cookie;
 let defaultedBookId;
+let normalizedCopyId;
+let normalizedWorkId;
 
 beforeAll(async () => {
   // Start from the pre-copy-details schema so every API integration run also
@@ -660,5 +663,222 @@ describe("books API", () => {
     });
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "Unsupported cover URL" });
+  });
+
+  it("uses normalized works, editions, copies, duplicate review, and hierarchical locations", async () => {
+    const homeResponse = await fetch(`${baseUrl}/api/locations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ name: "Home", levelType: "building" }),
+    });
+    expect(homeResponse.status).toBe(201);
+    const home = await homeResponse.json();
+    const homeId = home.id;
+
+    const shelfResponse = await fetch(`${baseUrl}/api/locations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ name: "Shelf 4", levelType: "shelf", parentId: homeId }),
+    });
+    expect(shelfResponse.status).toBe(201);
+    const shelf = await shelfResponse.json();
+    const shelfId = shelf.id;
+
+    const firstResponse = await fetch(`${baseUrl}/api/catalog`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        title: "Normalized Catalog Book",
+        author: "Catalog Author",
+        isbn: "0-306-40615-2",
+        status: "owned",
+        formats: ["physical"],
+        locationId: shelfId,
+        series: "Decimal Series",
+        seriesNumber: "1.5",
+        readingOrder: 1.25,
+        readStatus: "reading",
+      }),
+    });
+    expect(firstResponse.status).toBe(201);
+    const first = await firstResponse.json();
+    expect(first.created).toHaveLength(1);
+    normalizedCopyId = String(first.created[0].id);
+    normalizedWorkId = String(first.workId);
+
+    const duplicateResponse = await fetch(`${baseUrl}/api/catalog/duplicates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ isbn: "9780306406157", title: "Different display title", author: "Catalog Author" }),
+    });
+    expect(duplicateResponse.status).toBe(200);
+    const duplicate = await duplicateResponse.json();
+    expect(duplicate.warnings[0]).toMatchObject({
+      matchType: "exact_isbn",
+      copyCount: 1,
+      copies: [expect.objectContaining({ location: "Home / Shelf 4" })],
+    });
+
+    const anotherCopyResponse = await fetch(`${baseUrl}/api/catalog`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        title: "Normalized Catalog Book",
+        author: "Catalog Author",
+        isbn: "9780306406157",
+        status: "owned",
+        formats: ["physical"],
+        locationId: shelfId,
+      }),
+    });
+    expect(anotherCopyResponse.status).toBe(201);
+
+    const catalogResponse = await fetch(`${baseUrl}/api/catalog?q=Decimal%20Series&page=1&pageSize=10`, {
+      headers: { Cookie: cookie },
+    });
+    expect(catalogResponse.status).toBe(200);
+    const catalog = await catalogResponse.json();
+    expect(catalog.pagination).toMatchObject({ page: 1, pageSize: 10, total: 2 });
+    expect(catalog.items[0]).toMatchObject({
+      status: "owned",
+      storageLocation: "Home / Shelf 4",
+      counts: { editions: 1, editionCopies: 2, workCopies: 2 },
+      book: { isbn13: "9780306406157", series: "Decimal Series", seriesNumber: "1.5" },
+    });
+    expect(catalog.items.map(item => item.copyId).filter(Boolean)).toHaveLength(2);
+  });
+
+  it("keeps loan history and per-member private reading activity separate", async () => {
+    const childCreate = await fetch(`${baseUrl}/api/household/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        name: "Catalog Child",
+        email: "catalog-child@bookvault.local",
+        password: "catalogchildpassword",
+        householdRole: "child",
+      }),
+    });
+    expect(childCreate.status).toBe(201);
+    const child = (await childCreate.json()).members.find(member => member.email === "catalog-child@bookvault.local");
+    const childLogin = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: child.email, password: "catalogchildpassword" }),
+    });
+    expect(childLogin.status).toBe(200);
+    const childCookie = childLogin.headers.get("set-cookie").split(";")[0];
+
+    const childInventoryAttempt = await fetch(`${baseUrl}/api/catalog`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: childCookie },
+      body: JSON.stringify({
+        title: "Child Owned Attempt",
+        author: "Permission Test",
+        status: "owned",
+        formats: ["physical"],
+      }),
+    });
+    expect(childInventoryAttempt.status).toBe(403);
+
+    const childReading = await fetch(`${baseUrl}/api/reading/works/${normalizedWorkId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: childCookie },
+      body: JSON.stringify({
+        status: "reading",
+        privateNotes: "Only the child can see this",
+        householdNotes: "Reading this now",
+        rating: 4.5,
+      }),
+    });
+    expect(childReading.status).toBe(200);
+    await expect(childReading.json()).resolves.toMatchObject({
+      state: {
+        status: "reading",
+        privateNotes: "Only the child can see this",
+        householdNotes: "Reading this now",
+      },
+    });
+
+    const adminView = await fetch(`${baseUrl}/api/reading/works/${normalizedWorkId}?userId=${child.id}`, {
+      headers: { Cookie: cookie },
+    });
+    expect(adminView.status).toBe(200);
+    const adminReading = await adminView.json();
+    expect(adminReading.state.privateNotes).toBeUndefined();
+    expect(adminReading.state.householdNotes).toBe("Reading this now");
+
+    const checkout = await fetch(`${baseUrl}/api/loans`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        copyId: normalizedCopyId,
+        borrowerUserId: child.id,
+        checkoutAt: "2026-08-01",
+        dueAt: "2026-08-10",
+      }),
+    });
+    expect(checkout.status).toBe(201);
+    const loan = (await checkout.json()).loan;
+    expect(loan).toMatchObject({ copyId: normalizedCopyId, borrower: { type: "member", name: "Catalog Child" } });
+
+    const returned = await fetch(`${baseUrl}/api/loans/${loan.id}/return`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ returnedAt: "2026-08-09" }),
+    });
+    expect(returned.status).toBe(200);
+    await expect(returned.json()).resolves.toMatchObject({ loan: { status: "returned", returnedAt: expect.any(String) } });
+
+    const history = await fetch(`${baseUrl}/api/loans?history=true`, { headers: { Cookie: cookie } });
+    expect(history.status).toBe(200);
+    const historyPayload = await history.json();
+    expect(historyPayload.loans).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: loan.id, status: "returned", copyId: normalizedCopyId }),
+    ]));
+  });
+
+  it("creates, validates, previews, and downloads a complete persistent backup", async () => {
+    const create = await fetch(`${baseUrl}/api/admin/backups`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+    });
+    expect(create.status).toBe(201);
+    const backup = (await create.json()).backup;
+    expect(backup).toMatchObject({
+      status: "complete",
+      integrity: "ok",
+      counts: expect.objectContaining({ users: expect.any(Number), works: expect.any(Number), copies: expect.any(Number) }),
+    });
+
+    const preview = await fetch(`${baseUrl}/api/admin/backups/${backup.id}/restore-preview`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+    });
+    expect(preview.status).toBe(200);
+    await expect(preview.json()).resolves.toMatchObject({
+      preview: {
+        ready: true,
+        database: {
+          integrity: "ok",
+          databaseVersion: 4,
+        },
+        manifest: { application: "Book Vault", includes: ["database", "covers"] },
+      },
+    });
+
+    const download = await fetch(`${baseUrl}/api/admin/backups/${backup.id}/download`, {
+      headers: { Cookie: cookie },
+    });
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-type")).toBe("application/x-tar");
+    expect((await download.arrayBuffer()).byteLength).toBeGreaterThan(1024);
+
+    const integrity = await fetch(`${baseUrl}/api/admin/integrity`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+    });
+    expect(integrity.status).toBe(200);
+    await expect(integrity.json()).resolves.toEqual({ status: "ok", messages: ["ok"] });
   });
 });

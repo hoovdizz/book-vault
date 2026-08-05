@@ -9,9 +9,17 @@ lerna-debug.log*
 
 node_modules
 data
+config
 dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+coverage
 
 # Editor directories and files
 .vscode/*

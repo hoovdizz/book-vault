@@ -21,6 +21,8 @@ environment:
   HARDCOVER_API_TOKEN: ""
   BOOK_LOOKUP_TIMEOUT_MS: "6000"
   SESSION_DAYS: "30"
+  TRUST_PROXY: "false"
   ADMIN_NAME: bookvaultadmin
   ADMIN_EMAIL: admin@bookvault.local
-  ADMIN_PASSWORD: bookvaultpassword
+  # Required on first run. Set a unique value; Book Vault has no default password.
+  ADMIN_PASSWORD: ""

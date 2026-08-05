@@ -7,7 +7,7 @@ RUN npm run build
 
 FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
 LABEL org.opencontainers.image.title="BookVault" \
-      org.opencontainers.image.description="Self-hosted personal book library" \
+      org.opencontainers.image.description="Self-hosted household book catalog and reading tracker" \
       org.opencontainers.image.source="https://github.com/hoovdizz/book-vault" \
       net.unraid.docker.icon="https://raw.githubusercontent.com/hoovdizz/book-vault/development/public/book-vault-icon.png"
 ENV NODE_ENV=production \
@@ -17,10 +17,16 @@ ENV NODE_ENV=production \
     PGID=100 \
     DATABASE_PATH=/config/book-vault.sqlite \
     BOOK_LOOKUP_TIMEOUT_MS=6000 \
-    SESSION_DAYS=30
+    SESSION_DAYS=30 \
+    TRUST_PROXY=false \
+    ENABLE_LEGACY_API=false
 WORKDIR /app
 COPY --from=build /app/dist ./dist
-COPY server/database.mjs server/server.mjs server/book-search.mjs ./server/
+COPY server/book-search.mjs server/catalog.mjs server/covers.mjs \
+     server/database.mjs server/data-transfer.mjs server/households.mjs \
+     server/loans.mjs server/locations.mjs server/maintenance.mjs \
+     server/metadata.mjs server/migrations.mjs server/organization.mjs \
+     server/reading.mjs server/restore-startup.mjs server/server.mjs ./server/
 COPY docker-entrypoint.sh /usr/local/bin/book-vault-entrypoint
 # npm is required only in the build stage. The runtime uses Node built-ins, so
 # remove npm/npx and their dependency tree from the published attack surface.
