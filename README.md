@@ -88,6 +88,8 @@ The admin environment variables create the first account only when the database 
 
 Open **Collection → Add Book** or **Wishlist → Add to Wishlist** and search with a title, ISBN-10, or ISBN-13. Select the camera button to scan the 978/979 ISBN barcode with a phone. Live scanning uses the rear camera over HTTPS; when BookVault is opened over plain HTTP, use **Take or choose barcode photo** instead. The photo is decoded locally in the browser and is never uploaded. Both add buttons use the same provider search, metadata, and cover-selection flow; the Wishlist button automatically saves the book with a wishlist status. Select a result, choose a cover, then optionally record its collection, series, series position, format, binding, and edition before saving. Use **Move to Collection** on a wishlist title after purchasing it; the change is persisted in SQLite.
 
+Select any saved book to open its editor. Use **Remove book** and confirm **Remove permanently** to delete that copy from BookVault. Removal is limited to the signed-in user's books and cannot be undone.
+
 Click any persisted book card to edit its metadata, cover, format, Collection/Wishlist/Backlog location, and **Unread / Currently reading / Read** status. Each physical copy can also record its binding, edition, condition grade, free-form damage notes such as bent corners or a broken spine, and whether it is loaned out. A loan can include the borrower's name and loan date. Loaned books have a visible badge and are counted on the Dashboard. The **More** button in the editor repeats the provider lookup and adds newly found cover editions without discarding the current cover.
 
 Open **Series → Add Book Series**, choose **Auto**, **Hardcover**, or **Open Library**, search by series name, and review the returned volumes. Hardcover is the preferred source for exact series positions and requires `HARDCOVER_API_TOKEN`. Auto tries Hardcover when configured and falls back to Open Library. Open Library positions are read from its series metadata when present; missing positions are inferred from publication order. Every position is populated and remains editable before import. Mark each new title as **Collection**, **Wishlist**, or **Skip**, or use the bulk selection buttons, then import the selected rows together. Existing ISBN/title matches are identified and are not duplicated.
@@ -123,6 +125,7 @@ Authenticated book endpoints:
 - `POST /api/books` validates and stores a book for the signed-in user.
 - `POST /api/books/bulk` validates and imports up to 100 reviewed series books.
 - `PUT /api/books/:id` updates one of the signed-in user's books and reading status.
+- `DELETE /api/books/:id` permanently removes one of the signed-in user's books.
 - `PATCH /api/books/:id/status` moves one of the signed-in user's books between the collection, wishlist, and backlog.
 
 The requested human-readable defaults are in [`unraid-defaults.yaml`](unraid-defaults.yaml). Unraid does not read that YAML file; it imports [`unraid/book-vault.xml`](unraid/book-vault.xml). Unraid also saves a separate local copy for every created container and rewrites that copy when the container is edited.

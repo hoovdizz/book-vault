@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Check, ImageOff, Loader2, Search } from 'lucide-react';
+import { Check, ImageOff, Loader2, Search, Trash2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/auth';
@@ -7,6 +7,17 @@ import { BookBinding, BookCondition, BookFormat, BookSearchResult, CoverOption, 
 import { bindingLabels, conditionLabels } from '@/lib/book-copy';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import {
   Dialog,
   DialogContent,
@@ -107,6 +118,7 @@ export default function EditBookDialog({
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [findingCovers, setFindingCovers] = useState(false);
   const [failedCovers, setFailedCovers] = useState<Set<string>>(new Set());
 
@@ -114,6 +126,7 @@ export default function EditBookDialog({
     if (open && book) {
       setDraft(draftFromBook(book));
       setFailedCovers(new Set());
+      setDeleting(false);
     }
   }, [book, open]);
 
@@ -188,6 +201,22 @@ export default function EditBookDialog({
       toast.error(error instanceof Error ? error.message : 'Could not update book');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function deleteBook() {
+    if (!book || !draft) return;
+    setDeleting(true);
+    try {
+      await api(`/api/books/${book.id}`, { method: 'DELETE' });
+      await queryClient.invalidateQueries({ queryKey: ['books'] });
+      await queryClient.invalidateQueries({ queryKey: ['book-duplicates'] });
+      toast.success(`Removed "${draft.title}"`);
+      onOpenChange(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not remove book');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -379,12 +408,42 @@ export default function EditBookDialog({
                 </div>
               </section>
             </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button type="submit" disabled={saving}>
-                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save changes
-              </Button>
+            <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button type="button" variant="destructive" disabled={saving || deleting}>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Remove book
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Remove this book?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently removes "{draft.title}" from BookVault. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={deleting}>Keep book</AlertDialogCancel>
+                    <AlertDialogAction
+                      type="button"
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      disabled={deleting}
+                      onClick={() => void deleteBook()}
+                    >
+                      {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Remove permanently
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button type="button" variant="outline" disabled={deleting} onClick={() => onOpenChange(false)}>Cancel</Button>
+                <Button type="submit" disabled={saving || deleting}>
+                  {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save changes
+                </Button>
+              </div>
             </DialogFooter>
           </form>
         )}

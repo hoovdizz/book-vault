@@ -241,6 +241,62 @@ describe("books API", () => {
     });
   });
 
+  it("removes only the signed-in user's book", async () => {
+    const createResponse = await fetch(`${baseUrl}/api/books`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        title: "Delete Integration Book",
+        author: "BookVault",
+        status: "owned",
+        formats: ["physical"],
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json();
+
+    const createOtherUserResponse = await fetch(`${baseUrl}/api/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        name: "Delete Reader",
+        email: "delete-reader@bookvault.local",
+        password: "deletepassword",
+        role: "user",
+      }),
+    });
+    expect(createOtherUserResponse.status).toBe(201);
+    const otherLoginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "delete-reader@bookvault.local",
+        password: "deletepassword",
+      }),
+    });
+    expect(otherLoginResponse.status).toBe(200);
+    const otherCookie = otherLoginResponse.headers.get("set-cookie").split(";")[0];
+
+    const crossUserDeleteResponse = await fetch(`${baseUrl}/api/books/${created.book.id}`, {
+      method: "DELETE",
+      headers: { Cookie: otherCookie },
+    });
+    expect(crossUserDeleteResponse.status).toBe(404);
+
+    const deleteResponse = await fetch(`${baseUrl}/api/books/${created.book.id}`, {
+      method: "DELETE",
+      headers: { Cookie: cookie },
+    });
+    expect(deleteResponse.status).toBe(200);
+    await expect(deleteResponse.json()).resolves.toEqual({ ok: true });
+
+    const deletedBookResponse = await fetch(`${baseUrl}/api/books/${created.book.id}`, {
+      method: "DELETE",
+      headers: { Cookie: cookie },
+    });
+    expect(deletedBookResponse.status).toBe(404);
+  });
+
   it("finds duplicate owned copies across ISBN, binding, and edition differences", async () => {
     const copies = [
       {

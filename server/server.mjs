@@ -459,6 +459,14 @@ async function api(req, res, url) {
     return send(res, 201, { book: publicBook(created) });
   }
   const bookMatch = url.pathname.match(/^\/api\/books\/([1-9]\d*)$/);
+  if (req.method === "DELETE" && bookMatch) {
+    const bookId = Number(bookMatch[1]);
+    if (!Number.isSafeInteger(bookId)) return send(res, 400, { error: "Invalid book ID" });
+    const result = db.prepare("DELETE FROM books WHERE id = ? AND user_id = ?").run(bookId, user.id);
+    if (!result.changes) return send(res, 404, { error: "Book not found" });
+    audit("book_deleted", req, { userId: user.id, bookId });
+    return send(res, 200, { ok: true });
+  }
   if (req.method === "PUT" && bookMatch) {
     const bookId = Number(bookMatch[1]);
     if (!Number.isSafeInteger(bookId)) return send(res, 400, { error: "Invalid book ID" });
