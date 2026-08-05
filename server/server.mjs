@@ -110,6 +110,17 @@ const bookLookupWindowMs = 5 * 60 * 1000;
 const bookLookupAttempts = new Map();
 const legacyApiEnabled = process.env.ENABLE_LEGACY_API === "true";
 const trustProxy = process.env.TRUST_PROXY === "true";
+const configuredPublicOrigin = (() => {
+  const value = String(process.env.PUBLIC_ORIGIN || "").trim();
+  if (!value) return null;
+  const parsed = new URL(value);
+  if (!["http:", "https:"].includes(parsed.protocol)
+    || parsed.username || parsed.password || parsed.pathname !== "/"
+    || parsed.search || parsed.hash) {
+    throw new Error("PUBLIC_ORIGIN must be an http(s) origin without a path, query, or credentials");
+  }
+  return parsed.origin;
+})();
 const allowedBindings = new Set(["hardcover", "paperback", "mass_market_paperback", "library_binding", "spiral_bound", "other"]);
 const allowedConditions = new Set(["new", "like_new", "good", "fair", "poor", "damaged"]);
 const allowedReadStatuses = new Set(["read", "unread", "reading"]);
@@ -236,8 +247,61 @@ function currentUser(req) {
   if (user) db.prepare("UPDATE sessions SET last_used_at = CURRENT_TIMESTAMP WHERE token_hash = ?").run(user.token_hash);
   return user;
 }
+function firstHeaderValue(value) {
+  return String(Array.isArray(value) ? value[0] : value || "").split(",")[0].trim();
+}
+function forwardedParameters(req) {
+  if (!trustProxy) return {};
+  const first = firstHeaderValue(req.headers.forwarded);
+  if (!first) return {};
+  return Object.fromEntries(first.split(";").map(part => {
+    const separator = part.indexOf("=");
+    if (separator < 1) return ["", ""];
+    return [
+      part.slice(0, separator).trim().toLowerCase(),
+      part.slice(separator + 1).trim().replace(/^"(.*)"$/, "$1"),
+    ];
+  }).filter(([key]) => key));
+}
+function externalProtocol(req) {
+  if (req.socket.encrypted) return "https";
+  if (!trustProxy) return "http";
+  const forwarded = forwardedParameters(req);
+  const value = firstHeaderValue(req.headers["x-forwarded-proto"]) || forwarded.proto || "http";
+  return value.toLowerCase() === "https" ? "https" : "http";
+}
+function externalHost(req) {
+  const forwarded = forwardedParameters(req);
+  const value = trustProxy
+    ? firstHeaderValue(req.headers["x-forwarded-host"]) || forwarded.host || req.headers.host
+    : req.headers.host;
+  const host = firstHeaderValue(value);
+  if (!host || /[\s/\\]/.test(host)) return null;
+  return host;
+}
+function externalOrigin(req) {
+  const authority = externalHost(req);
+  if (!authority) return null;
+  try {
+    return new URL(`${externalProtocol(req)}://${authority}`).origin;
+  } catch {
+    return null;
+  }
+}
+function sameRequestOrigin(req, value) {
+  try {
+    const origin = new URL(String(value)).origin;
+    return [configuredPublicOrigin, externalOrigin(req)].filter(Boolean).includes(origin);
+  } catch {
+    return false;
+  }
+}
 function clientAddress(req) {
-  return String(req.socket.remoteAddress || "unknown");
+  if (trustProxy) {
+    const forwarded = firstHeaderValue(req.headers["x-forwarded-for"]);
+    if (forwarded) return forwarded.slice(0, 100);
+  }
+  return String(req.socket.remoteAddress || "unknown").slice(0, 100);
 }
 function rateKeys(req, email) {
   return [`ip:${clientAddress(req)}`, `account:${String(email || "").trim().toLowerCase().slice(0, 254)}`];
@@ -258,7 +322,7 @@ function failedLogin(keys) {
   }
 }
 function cookieHeader(req, token, maxAge) {
-  const secure = req.socket.encrypted || (trustProxy && req.headers["x-forwarded-proto"] === "https");
+  const secure = externalProtocol(req) === "https" || configuredPublicOrigin?.startsWith("https://");
   return `${sessionCookie}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
 }
 function validEmail(email) {
@@ -1746,6 +1810,7 @@ async function api(req, res, url) {
       status: url.searchParams.get("status"),
       format: url.searchParams.get("format"),
       readStatus: url.searchParams.get("readStatus"),
+      ownership: url.searchParams.get("ownership"),
       owner: url.searchParams.get("owner"),
       locationId: url.searchParams.get("locationId"),
       sort: url.searchParams.get("sort"),
@@ -2112,8 +2177,11 @@ export const server = createServer(async (req, res) => {
   try {
     const unsafe = !["GET", "HEAD", "OPTIONS"].includes(req.method || "");
     const origin = req.headers.origin;
-    const protocol = req.socket.encrypted || (trustProxy && req.headers["x-forwarded-proto"] === "https") ? "https" : "http";
-    if (unsafe && origin && origin !== `${protocol}://${req.headers.host}`) return send(res, 403, { error: "Cross-origin request rejected" });
+    if (unsafe && origin && !sameRequestOrigin(req, origin)) {
+      return send(res, 403, {
+        error: "Cross-origin request rejected. Behind a secure proxy, enable TRUST_PROXY and forward the original host and protocol.",
+      });
+    }
     if (url.pathname.startsWith("/api/")) await api(req, res, url);
     else if (req.method === "GET" || req.method === "HEAD") await staticFile(req, res, url.pathname);
     else send(res, 405, { error: "Method not allowed" });

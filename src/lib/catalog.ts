@@ -8,6 +8,7 @@ export type CatalogQuery = {
   status?: string[];
   format?: string[];
   readStatus?: string[];
+  ownership?: 'mine' | 'household';
   owner?: string[];
   locationId?: string;
   sort?: string;
@@ -22,6 +23,7 @@ export function catalogUrl(query: CatalogQuery = {}) {
   if (query.status?.length) parameters.set('status', query.status.join(','));
   if (query.format?.length) parameters.set('format', query.format.join(','));
   if (query.readStatus?.length) parameters.set('readStatus', query.readStatus.join(','));
+  if (query.ownership) parameters.set('ownership', query.ownership);
   if (query.owner?.length) parameters.set('owner', query.owner.join(','));
   if (query.locationId) parameters.set('locationId', query.locationId);
   if (query.sort) parameters.set('sort', query.sort);

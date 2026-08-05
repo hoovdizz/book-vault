@@ -51,6 +51,7 @@ export default function Collection() {
   const [page, setPage] = useState(1);
   const [formatFilters, setFormatFilters] = useState<BookFormat[]>([]);
   const [readingFilters, setReadingFilters] = useState<string[]>([]);
+  const [ownerFilter, setOwnerFilter] = useState('all');
   const [locationId, setLocationId] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [showAddBook, setShowAddBook] = useState(false);
@@ -78,6 +79,8 @@ export default function Collection() {
     status: ['owned'],
     format: formatFilters,
     readStatus: readingFilters,
+    ownership: ownerFilter === 'mine' || ownerFilter === 'household' ? ownerFilter : undefined,
+    owner: ownerFilter.startsWith('member:') ? [ownerFilter.slice('member:'.length)] : undefined,
     locationId: locationId || undefined,
     sort,
     direction: 'asc' as const,
@@ -91,6 +94,13 @@ export default function Collection() {
     queryKey: ['locations'],
     queryFn: () => api<{ locations: Location[] }>('/api/locations?archived=false'),
   });
+  const { data: householdData } = useQuery({
+    queryKey: ['household'],
+    queryFn: () => api<{
+      household: { name: string };
+      members: { id: number; name: string; disabled: boolean }[];
+    }>('/api/household'),
+  });
   const { data: collectionsData } = useQuery({
     queryKey: ['collections'],
     queryFn: () => api<{ collections: {
@@ -101,6 +111,7 @@ export default function Collection() {
         q?: string;
         format?: BookFormat[];
         readStatus?: string[];
+        ownerFilter?: string;
         locationId?: string;
       } | null;
     }[] }>('/api/collections'),
@@ -110,7 +121,7 @@ export default function Collection() {
     queryFn: () => api<{ series: { name: string }[] }>('/api/catalog/series'),
   });
 
-  useEffect(() => setPage(1), [deferredSearch, formatFilters, readingFilters, locationId, sort]);
+  useEffect(() => setPage(1), [deferredSearch, formatFilters, readingFilters, ownerFilter, locationId, sort]);
 
   useEffect(() => {
     if (initialQuery) setSearch(current => current === initialQuery ? current : initialQuery);
@@ -122,6 +133,7 @@ export default function Collection() {
     setSearch(typeof saved.q === 'string' ? saved.q : initialQuery);
     setFormatFilters(Array.isArray(saved.format) ? saved.format.filter(value => ['physical', 'ebook', 'audiobook'].includes(String(value))) as BookFormat[] : []);
     setReadingFilters(Array.isArray(saved.readStatus) ? saved.readStatus.map(String) : []);
+    setOwnerFilter(typeof saved.ownerFilter === 'string' ? saved.ownerFilter : 'all');
     setLocationId(typeof saved.locationId === 'string' ? saved.locationId : '');
     filtersHydrated.current = true;
   }, [initialQuery, preferences]);
@@ -136,13 +148,14 @@ export default function Collection() {
             q: search,
             format: formatFilters,
             readStatus: readingFilters,
+            ownerFilter,
             locationId,
           },
         }),
       });
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [search, formatFilters, readingFilters, locationId]);
+  }, [search, formatFilters, readingFilters, ownerFilter, locationId]);
 
   async function savePreferences(changes: Partial<Preferences>) {
     await api('/api/preferences', {
@@ -168,6 +181,7 @@ export default function Collection() {
     setSearch(filter.q || '');
     setFormatFilters(filter.format || []);
     setReadingFilters(filter.readStatus || []);
+    setOwnerFilter(filter.ownerFilter || 'all');
     setLocationId(filter.locationId || '');
     setPage(1);
   }
@@ -181,7 +195,7 @@ export default function Collection() {
         body: JSON.stringify({
           name,
           scope: 'personal',
-          smartFilter: { q: search, format: formatFilters, readStatus: readingFilters, locationId },
+          smartFilter: { q: search, format: formatFilters, readStatus: readingFilters, ownerFilter, locationId },
         }),
       });
       setSmartShelfName('');
@@ -382,6 +396,22 @@ export default function Collection() {
             ))}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor="collection-owner" className="text-sm font-medium">Collection owner</label>
+            <select
+              id="collection-owner"
+              value={ownerFilter}
+              onChange={event => setOwnerFilter(event.target.value)}
+              className="h-9 max-w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="all">Entire {householdData?.household.name || 'household'} collection</option>
+              <option value="mine">My personal collection</option>
+              <option value="household">Shared household-owned copies</option>
+              {(householdData?.members || []).filter(member => !member.disabled).map(member => (
+                <option key={member.id} value={`member:${member.id}`}>{member.name}&apos;s collection</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             <label htmlFor="collection-location" className="text-sm font-medium">Location and descendants</label>
             <select
               id="collection-location"
@@ -394,10 +424,11 @@ export default function Collection() {
                 <option key={location.id} value={location.id}>{location.breadcrumb}</option>
               ))}
             </select>
-            {(formatFilters.length > 0 || readingFilters.length > 0 || locationId) && (
+            {(formatFilters.length > 0 || readingFilters.length > 0 || ownerFilter !== 'all' || locationId) && (
               <Button type="button" size="sm" variant="ghost" onClick={() => {
                 setFormatFilters([]);
                 setReadingFilters([]);
+                setOwnerFilter('all');
                 setLocationId('');
               }}>
                 Clear filters

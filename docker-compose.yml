@@ -24,3 +24,4 @@ services:
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in your environment}"
       SESSION_DAYS: "30"
       TRUST_PROXY: "${TRUST_PROXY:-false}"
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-}"

@@ -11,6 +11,7 @@ process.env.ADMIN_NAME = "Integration Admin";
 process.env.ADMIN_EMAIL = "integration@bookvault.local";
 process.env.ADMIN_PASSWORD = "integrationpassword";
 process.env.ENABLE_LEGACY_API = "true";
+process.env.TRUST_PROXY = "true";
 
 let server;
 let db;
@@ -80,6 +81,34 @@ describe("books API", () => {
     expect(response.headers.get("permissions-policy")).toContain("camera=(self)");
     expect(response.headers.get("permissions-policy")).toContain("microphone=()");
     expect(response.headers.get("content-security-policy")).toContain("img-src 'self' data: blob:");
+  });
+
+  it("accepts the trusted HTTPS reverse-proxy origin and issues a secure cookie", async () => {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://books.example.test",
+        "X-Forwarded-Proto": "https",
+        "X-Forwarded-Host": "books.example.test",
+        "X-Forwarded-For": "192.0.2.42",
+      },
+      body: JSON.stringify({ email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toContain("Secure");
+
+    const rejected = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://attacker.example.test",
+        "X-Forwarded-Proto": "https",
+        "X-Forwarded-Host": "books.example.test",
+      },
+      body: JSON.stringify({ email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD }),
+    });
+    expect(rejected.status).toBe(403);
   });
 
   it("rejects unsupported series providers without making an external request", async () => {
@@ -733,19 +762,48 @@ describe("books API", () => {
     });
     expect(anotherCopyResponse.status).toBe(201);
 
+    const householdCopyResponse = await fetch(`${baseUrl}/api/catalog`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        title: "Normalized Catalog Book",
+        author: "Catalog Author",
+        isbn: "9780306406157",
+        status: "owned",
+        formats: ["physical"],
+        householdOwned: true,
+        locationId: shelfId,
+      }),
+    });
+    expect(householdCopyResponse.status).toBe(201);
+
     const catalogResponse = await fetch(`${baseUrl}/api/catalog?q=Decimal%20Series&page=1&pageSize=10`, {
       headers: { Cookie: cookie },
     });
     expect(catalogResponse.status).toBe(200);
     const catalog = await catalogResponse.json();
-    expect(catalog.pagination).toMatchObject({ page: 1, pageSize: 10, total: 2 });
+    expect(catalog.pagination).toMatchObject({ page: 1, pageSize: 10, total: 3 });
     expect(catalog.items[0]).toMatchObject({
       status: "owned",
       storageLocation: "Home / Shelf 4",
-      counts: { editions: 1, editionCopies: 2, workCopies: 2 },
+      counts: { editions: 1, editionCopies: 3, workCopies: 3 },
       book: { isbn13: "9780306406157", series: "Decimal Series", seriesNumber: "1.5" },
     });
-    expect(catalog.items.map(item => item.copyId).filter(Boolean)).toHaveLength(2);
+    expect(catalog.items.map(item => item.copyId).filter(Boolean)).toHaveLength(3);
+
+    const mineResponse = await fetch(`${baseUrl}/api/catalog?q=Normalized%20Catalog&status=owned&ownership=mine`, {
+      headers: { Cookie: cookie },
+    });
+    expect(mineResponse.status).toBe(200);
+    expect((await mineResponse.json()).pagination.total).toBe(2);
+
+    const householdResponse = await fetch(`${baseUrl}/api/catalog?q=Normalized%20Catalog&status=owned&ownership=household`, {
+      headers: { Cookie: cookie },
+    });
+    expect(householdResponse.status).toBe(200);
+    const householdCatalog = await householdResponse.json();
+    expect(householdCatalog.pagination.total).toBe(1);
+    expect(householdCatalog.items[0].owner.name).toBe("Household");
   });
 
   it("keeps loan history and per-member private reading activity separate", async () => {

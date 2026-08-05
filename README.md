@@ -66,6 +66,7 @@ Do not store the only backup inside an unmounted container filesystem. Map the c
 | `HARDCOVER_API_TOKEN` | empty | Optional server-side Hardcover token |
 | `BOOK_LOOKUP_TIMEOUT_MS` | `6000` | Per-provider timeout, bounded to 2–10 seconds |
 | `TRUST_PROXY` | `false` | Trust `X-Forwarded-Proto` only behind a controlled proxy |
+| `PUBLIC_ORIGIN` | empty | Optional exact public origin, such as `https://books.example.com` |
 
 The administrator variables are used only when the database has no users. Changing them later does not reset an existing account. Book Vault deliberately has no production default password and public registration is disabled.
 
@@ -228,7 +229,9 @@ The publish workflow maps `main` to `latest` and `development` to `development`.
 4. Open **Collection → Add book** for a single lookup, or **Batch scan** for continuous camera/USB/Bluetooth entry.
 5. Open **Administration** to configure provider order, define custom fields, import existing data, and create the first backup.
 
-Camera access is requested only when a scanner opens. Live camera scanning normally requires HTTPS; the photo-based scanner remains available when the browser cannot grant a live stream. The installed PWA has the same catalog and scanner workflows as the desktop view.
+Camera access is requested only after selecting **Start live camera** in a scanner. This direct user action reliably opens the permission prompt on mobile Safari and Chromium. Live camera scanning requires HTTPS; a clearly labeled photo fallback remains available when the browser cannot grant a stream. The installed PWA has the same catalog and scanner workflows as the desktop view.
+
+Under **Collection → Filters → Collection owner**, choose the entire household, your personal copies, unassigned shared household copies, or a specific member. Ownership choices are retained with personal view preferences and saved smart shelves.
 
 Location labels are created under **Settings → Hierarchical locations**. Select a batch destination from the hierarchy or scan its Book Vault QR label before scanning the books going there.
 
@@ -269,7 +272,16 @@ A restore always creates a pre-restore safety backup first. Never interrupt a co
 - CSP, origin checks, security headers, cover-host validation, and household-scoped queries are enabled.
 - Legacy `/api/books`, `/api/family`, and `/api/settings` routes are disabled in production; the normalized APIs are the default.
 
-For remote access, place Book Vault behind a trusted HTTPS reverse proxy. Set `TRUST_PROXY=true` only when direct client access to the application port is blocked and the proxy controls `X-Forwarded-Proto`.
+For remote access, place Book Vault behind a trusted HTTPS reverse proxy. Set `TRUST_PROXY=true` only when direct client access to the application port is blocked and the proxy controls `X-Forwarded-Proto`, `X-Forwarded-Host`, and `X-Forwarded-For`. Book Vault then validates unsafe requests against the public forwarded origin and marks login cookies `Secure`.
+
+If the proxy does not preserve the original host, also set `PUBLIC_ORIGIN` to the exact browser-facing origin:
+
+```text
+TRUST_PROXY=true
+PUBLIC_ORIGIN=https://books.example.com
+```
+
+Do not include a trailing application path. When using Nginx Proxy Manager, SWAG, Traefik, or Caddy, forward Book Vault to `http://UNRAID-IP:8130` and keep WebSocket support optional; Book Vault uses ordinary HTTP requests.
 
 ## Performance benchmark
 

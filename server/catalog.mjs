@@ -782,6 +782,9 @@ export function listCatalog(db, context, userId, options = {}) {
   const statuses = String(options.status || "").split(",").filter(status => ["owned", "wishlist", "backlog"].includes(status));
   const formats = String(options.format || "").split(",").filter(format => ["physical", "ebook", "audiobook"].includes(format));
   const readingStatuses = String(options.readStatus || "").split(",").filter(Boolean).slice(0, 20);
+  const ownership = ["mine", "household"].includes(String(options.ownership || ""))
+    ? String(options.ownership)
+    : "all";
   const ownerIds = String(options.owner || "")
     .split(",")
     .filter(Boolean)
@@ -908,7 +911,12 @@ export function listCatalog(db, context, userId, options = {}) {
     filters.push(`COALESCE(read_status, 'unread') IN (${readingStatuses.map(() => "?").join(",")})`);
     parameters.push(...readingStatuses);
   }
-  if (ownerIds.length) {
+  if (ownership === "mine") {
+    filters.push("owner_user_id = ?");
+    parameters.push(userId);
+  } else if (ownership === "household") {
+    filters.push("owner_user_id IS NULL");
+  } else if (ownerIds.length) {
     filters.push(`owner_user_id IN (${ownerIds.map(() => "?").join(",")})`);
     parameters.push(...ownerIds);
   }
