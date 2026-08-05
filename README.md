@@ -79,9 +79,14 @@ Unraid’s **Add Container** advanced view does not contain a remote-template UR
 
 ```sh
 mkdir -p /boot/config/plugins/dockerMan/templates-user
-curl --fail --location \
-  https://raw.githubusercontent.com/hoovdizz/book-vault/development/unraid/book-vault.xml \
-  --output /boot/config/plugins/dockerMan/templates-user/my-book-vault.xml
+TEMPLATE=/boot/config/plugins/dockerMan/templates-user/book-vault.xml
+if [ ! -f "$TEMPLATE" ]; then
+  curl --fail --location \
+    https://raw.githubusercontent.com/hoovdizz/book-vault/development/unraid/book-vault.xml \
+    --output "$TEMPLATE"
+else
+  echo "Book Vault template already exists; keeping local settings."
+fi
 ```
 
 Then:
@@ -94,7 +99,7 @@ Then:
 6. Enter a unique value in **Admin password**. The field is intentionally blank.
 7. Select **Apply**, then open `http://UNRAID-IP:8130`.
 
-The template source is [`unraid/book-vault.xml`](unraid/book-vault.xml). [`unraid-defaults.yaml`](unraid-defaults.yaml) is a human-readable reference; Unraid does not import YAML container templates.
+The template source is [`unraid/book-vault.xml`](unraid/book-vault.xml). [`unraid-defaults.yaml`](unraid-defaults.yaml) is a human-readable reference; Unraid does not import YAML container templates. The XML is copied to Unraid once and intentionally has no remote `TemplateURL`, so later image pulls cannot replace your local template values.
 
 ### Add the container manually
 
@@ -166,16 +171,15 @@ BookVault listening on http://0.0.0.0:8130
 
 ### Upgrade an existing Unraid container
 
-Pull the image and refresh the locally stored template:
+Pull the image and use Unraid’s **Update** action on the existing container:
 
 ```sh
 docker pull ghcr.io/hoovdizz/book-vault:development
-curl --fail --location \
-  https://raw.githubusercontent.com/hoovdizz/book-vault/development/unraid/book-vault.xml \
-  --output /boot/config/plugins/dockerMan/templates-user/my-book-vault.xml
 ```
 
-Refreshing the XML does not overwrite an already-created container’s settings. Open the existing container’s **Edit** page to change its repository, variables, or port.
+Do not re-download the XML during an image upgrade. Unraid stores the existing container’s port, path, and environment values separately from the image, and the `/config` mapping preserves the database and covers. Open **Edit** only when you intentionally want to change a setting.
+
+If you intentionally want new template fields, download the new XML to a temporary filename, review it, and merge only the fields you want into your local template. Do not overwrite the local XML blindly.
 
 If an older container still shows `3000/tcp`, remove that port entry and add TCP container port `8130` with host port `8130`. Remove any `PORT=3000` variable or change it to `8130`, then select **Apply**.
 

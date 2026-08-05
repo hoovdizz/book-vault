@@ -3,7 +3,6 @@
   <Name>BookVault</Name>
   <Repository>ghcr.io/hoovdizz/book-vault:development</Repository>
   <Registry>https://github.com/hoovdizz/book-vault/pkgs/container/book-vault</Registry>
-  <TemplateURL>https://raw.githubusercontent.com/hoovdizz/book-vault/development/unraid/book-vault.xml</TemplateURL>
   <Network>bridge</Network>
   <WebUI>http://[IP]:[PORT:8130]</WebUI>
   <Shell>sh</Shell>
