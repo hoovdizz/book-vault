@@ -21,6 +21,27 @@ if [ "$(id -u)" = "0" ]; then
   fi
 
   mkdir -p /config
+
+  # Unraid may recreate a container from its template during an image update.
+  # Keep the explicit reverse-proxy choice in /config so a template default
+  # cannot silently turn a configured HTTPS deployment back off.
+  proxy_config=/config/reverse-proxy.env
+  if [ -f "$proxy_config" ]; then
+    while IFS='=' read -r key value; do
+      case "$key" in
+        TRUST_PROXY) [ -n "$value" ] && TRUST_PROXY="$value" ;;
+        PUBLIC_ORIGIN) PUBLIC_ORIGIN="$value" ;;
+      esac
+    done < "$proxy_config"
+    export TRUST_PROXY PUBLIC_ORIGIN
+  fi
+  if [ "${TRUST_PROXY:-false}" = "true" ] || [ -n "${PUBLIC_ORIGIN:-}" ]; then
+    umask 077
+    {
+      printf 'TRUST_PROXY=%s\n' "${TRUST_PROXY:-false}"
+      printf 'PUBLIC_ORIGIN=%s\n' "${PUBLIC_ORIGIN:-}"
+    } > "$proxy_config"
+  fi
   chown -R "${puid}:${pgid}" /config
   exec su-exec "${puid}:${pgid}" "$@"
 fi

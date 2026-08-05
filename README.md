@@ -41,6 +41,7 @@ All durable data lives under `/config`:
 /config/uploads/
 /config/imports/
 /config/logs/
+/config/reverse-proxy.env
 ```
 
 The database uses SQLite WAL mode. Book Vault creates a consistent SQLite snapshot before its first destructive schema migration and records every applied schema version. Existing users, safely reusable hashed sessions, households/families, books, reading state, locations, conditions, loan records, covers, wishlist entries, backlog entries, collections, series, editions, and formats are migrated without silently deleting the legacy rows.
@@ -178,6 +179,8 @@ docker pull ghcr.io/hoovdizz/book-vault:development
 ```
 
 Do not re-download the XML during an image upgrade. Unraid stores the existing container’s port, path, and environment values separately from the image, and the `/config` mapping preserves the database and covers. Open **Edit** only when you intentionally want to change a setting.
+
+For reverse-proxy deployments, the entrypoint also records an explicitly enabled proxy configuration in `/config/reverse-proxy.env`. This protects `TRUST_PROXY=true` and `PUBLIC_ORIGIN` if Unraid recreates the container from a template whose defaults are different. To intentionally disable the persisted proxy setting, stop the container, remove that file, set `TRUST_PROXY=false`, and start it again.
 
 If you intentionally want new template fields, download the new XML to a temporary filename, review it, and merge only the fields you want into your local template. Do not overwrite the local XML blindly.
 
