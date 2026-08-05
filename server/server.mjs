@@ -722,7 +722,8 @@ async function api(req, res, url) {
     const expires = new Date(Date.now() + sessionDays * 86400000).toISOString();
     db.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").run(tokenHash(token), user.id, expires);
     audit("login_succeeded", req, { userId: user.id });
-    return send(res, 200, { user: publicUser(user) }, { "Set-Cookie": cookieHeader(req, token, sessionDays * 86400) });
+    const membership = householdContext(db, user.id);
+    return send(res, 200, { user: publicUser(user, membership?.household_role) }, { "Set-Cookie": cookieHeader(req, token, sessionDays * 86400) });
   }
   if (req.method === "POST" && url.pathname === "/api/invitations/accept") {
     const input = await jsonBody(req);
@@ -813,7 +814,7 @@ async function api(req, res, url) {
     return send(res, 200, { cover: result });
   }
   if (req.method === "GET" && url.pathname === "/api/auth/me") {
-    return send(res, 200, { user: publicUser(user), household: householdSummary(db, userHousehold) });
+    return send(res, 200, { user: publicUser(user, userHousehold.household_role), household: householdSummary(db, userHousehold) });
   }
   if (req.method === "POST" && url.pathname === "/api/auth/logout") {
     db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(user.token_hash);

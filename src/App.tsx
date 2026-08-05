@@ -37,7 +37,7 @@ const ProtectedApp = () => {
           "/": <Dashboard />, "/collection": <Collection />, "/backlog": <Backlog />,
           "/wishlist": <Wishlist />, "/series": <SeriesPage />, "/duplicates": <Duplicates />,
           "/loans": <Loans />, "/statistics": <Statistics />,
-          "/admin": user.role === "admin" ? <Admin /> : <Profile />,
+          "/admin": (user.role === "admin" || user.householdRole === "household_admin") ? <Admin /> : <Profile />,
           "/settings": <Profile />, "/profile": <Profile />,
         };
         return (

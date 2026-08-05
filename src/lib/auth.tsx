@@ -6,6 +6,7 @@ export type User = {
   email: string;
   role: "admin" | "user";
   systemRole?: "system_admin" | "user";
+  householdRole?: "household_admin" | "adult" | "child" | "viewer";
   disabled?: boolean;
   createdAt: string;
 };

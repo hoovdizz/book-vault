@@ -182,13 +182,14 @@ export async function verifyPassword(password, stored) {
   return timingSafeEqual(actual, expected);
 }
 
-export function publicUser(user) {
+export function publicUser(user, householdRole = null) {
   return user && {
     id: user.id,
     name: user.name,
     email: user.email,
     role: user.role,
     systemRole: user.system_role || (user.role === "admin" ? "system_admin" : "user"),
+    householdRole: householdRole || undefined,
     disabled: Boolean(user.disabled),
     createdAt: user.created_at,
   };

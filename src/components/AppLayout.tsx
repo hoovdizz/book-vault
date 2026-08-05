@@ -30,7 +30,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (preferenceData?.preferences.theme) setTheme(preferenceData.preferences.theme);
   }, [preferenceData, setTheme]);
-  const visibleNavItems = navItems.filter(item => item.to !== '/admin' || user?.role === 'admin');
+  const visibleNavItems = navItems.filter(item => item.to !== '/admin' || user?.role === 'admin' || user?.householdRole === 'household_admin');
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
