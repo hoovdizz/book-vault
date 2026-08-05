@@ -15,9 +15,14 @@ export default function Wishlist() {
   const [showAddBook, setShowAddBook] = useState(false);
   const [movingBookId, setMovingBookId] = useState<string | null>(null);
   const [editingBook, setEditingBook] = useState<UserBook | null>(null);
+  const [requester, setRequester] = useState('all');
   const { data, isLoading, error } = useQuery({
-    queryKey: ['catalog', 'wishlist'],
-    queryFn: () => fetchCatalog({ status: ['wishlist'], pageSize: 100, sort: 'dateAdded', direction: 'desc' }),
+    queryKey: ['catalog', 'wishlist', requester],
+    queryFn: () => fetchCatalog({ status: ['wishlist'], pageSize: 100, sort: 'dateAdded', direction: 'desc', requester: requester === 'all' ? undefined : [requester] }),
+  });
+  const { data: householdData } = useQuery({
+    queryKey: ['household'],
+    queryFn: () => api<{ members: { id: number; name: string; disabled: boolean }[] }>('/api/household'),
   });
   const { data: collectionsData } = useQuery({
     queryKey: ['collections'],
@@ -64,6 +69,14 @@ export default function Wishlist() {
         <Button type="button" className="gradient-warm w-fit gap-2 text-primary-foreground" onClick={() => setShowAddBook(true)}>
           <Plus className="h-4 w-4" />Add to wishlist
         </Button>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3">
+        <label htmlFor="wishlist-requester" className="text-sm font-medium">Show requests from</label>
+        <select id="wishlist-requester" value={requester} onChange={event => setRequester(event.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+          <option value="all">Everyone in the household</option>
+          {(householdData?.members || []).filter(member => !member.disabled).map(member => <option key={member.id} value={String(member.id)}>{member.name}</option>)}
+        </select>
+        <span className="text-xs text-muted-foreground">Wishlists are shared; backlogs remain private to each login.</span>
       </div>
 
       {isLoading ? (

@@ -500,6 +500,8 @@ const itemRowsSql = `
     edition.cover_url,
     edition.cover_path,
     edition.cover_options,
+    edition.estimated_value_cents,
+    edition.estimated_value_currency,
     edition.provider,
     edition.provider_record_id,
     copy.owner_user_id,
@@ -596,6 +598,8 @@ const itemRowsSql = `
     edition.cover_url,
     edition.cover_path,
     edition.cover_options,
+    edition.estimated_value_cents,
+    edition.estimated_value_currency,
     edition.provider,
     edition.provider_record_id,
     entry.requested_by AS owner_user_id,
@@ -664,11 +668,14 @@ const itemRowsSql = `
   LEFT JOIN user_work_state reading ON reading.work_id = work.id AND reading.user_id = ?
   WHERE entry.household_id = ? AND entry.archived_at IS NULL
     AND (
-      entry.requested_by = ?
-      OR (
-        entry.scope = 'household'
-        AND NOT(entry.gift_private = 1 AND entry.intended_recipient_id = ?)
-      )
+      (entry.list_type = 'backlog' AND entry.requested_by = ?)
+      OR (entry.list_type = 'wishlist' AND (
+        entry.requested_by = ?
+        OR (
+          entry.scope = 'household'
+          AND NOT(entry.gift_private = 1 AND entry.intended_recipient_id = ?)
+        )
+      ))
     )
 `;
 
@@ -723,8 +730,10 @@ function publicCatalogRow(row, locationById, userId, context) {
       genre: tags[0] || undefined,
       binding: row.binding || undefined,
       edition: row.edition_label || undefined,
-      source: row.provider,
-      sourceId: row.provider_record_id || undefined,
+    source: row.provider,
+    sourceId: row.provider_record_id || undefined,
+    estimatedValue: row.estimated_value_cents == null ? null : row.estimated_value_cents / 100,
+    estimatedCurrency: row.estimated_value_currency || null,
     },
     status: row.item_status,
     readStatus: row.read_status || "unread",
@@ -791,10 +800,16 @@ export function listCatalog(db, context, userId, options = {}) {
     .map(Number)
     .filter(ownerId => Number.isSafeInteger(ownerId) && ownerId > 0)
     .slice(0, 100);
+  const requesterIds = String(options.requester || "")
+    .split(",")
+    .filter(Boolean)
+    .map(Number)
+    .filter(requesterId => Number.isSafeInteger(requesterId) && requesterId > 0)
+    .slice(0, 100);
   const locationId = options.locationId == null || options.locationId === "" ? null : Number(options.locationId);
   if (locationId != null) assertLocationInHousehold(db, context.household_id, locationId);
   const filters = [];
-  const parameters = [userId, context.household_id, userId, context.household_id, userId, userId];
+  const parameters = [userId, context.household_id, userId, context.household_id, userId, userId, userId];
   if (search) {
     const pattern = `%${search.replace(/[\\%_]/g, "\\$&")}%`;
     const normalizedSearch = search.replace(/[^0-9a-z]/g, "");
@@ -919,6 +934,10 @@ export function listCatalog(db, context, userId, options = {}) {
   } else if (ownerIds.length) {
     filters.push(`owner_user_id IN (${ownerIds.map(() => "?").join(",")})`);
     parameters.push(...ownerIds);
+  }
+  if (requesterIds.length) {
+    filters.push(`(entity_type = 'list' AND owner_user_id IN (${requesterIds.map(() => "?").join(",")}))`);
+    parameters.push(...requesterIds);
   }
   if (locationId != null) {
     filters.push(`location_id IN (
@@ -1095,6 +1114,26 @@ export function moveCopies(db, context, userId, copyIds, locationId) {
     throw error;
   }
   return { moved: ids.length, locationId: destination == null ? null : String(destination) };
+}
+
+export function archiveCatalogItems(db, context, userId, copyIds) {
+  if (!canEditInventory(context)) throw Object.assign(new Error("This role cannot remove household inventory"), { status: 403 });
+  const ids = [...new Set((Array.isArray(copyIds) ? copyIds : []).map(Number))];
+  if (!ids.length || ids.length > 500 || ids.some(id => !Number.isSafeInteger(id) || id < 1)) {
+    throw Object.assign(new Error("Select between 1 and 500 copies"), { status: 400 });
+  }
+  const placeholders = ids.map(() => "?").join(",");
+  const copies = db.prepare(`
+    SELECT id FROM copies
+    WHERE household_id = ? AND id IN (${placeholders})
+      AND archived_at IS NULL AND copy_status = 'active'
+  `).all(context.household_id, ...ids);
+  if (copies.length !== ids.length) throw Object.assign(new Error("One or more copies were not found in this household"), { status: 404 });
+  db.prepare(`
+    UPDATE copies SET archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+    WHERE household_id = ? AND id IN (${placeholders})
+  `).run(context.household_id, ...ids);
+  return { archived: ids.length, ids: ids.map(String) };
 }
 
 export function archiveCatalogItem(db, context, userId, kind, entityId) {

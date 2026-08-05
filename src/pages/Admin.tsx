@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useState } from 'react';
-import { AlertTriangle, Archive, Database, Download, FileUp, HardDrive, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, Archive, Database, Download, FileUp, HardDrive, Loader2, Pencil, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/auth';
@@ -91,6 +91,11 @@ export default function Admin() {
     queryFn: () => api<{ households: { id: string; name: string; members: number; works: number; copies: number }[] }>('/api/admin/households'),
     retry: false,
   });
+  const { data: allUsers } = useQuery({
+    queryKey: ['admin-users'],
+    queryFn: () => api<{ users: { id: string; name: string; email: string; disabled: boolean; householdName: string; householdRole: string | null }[] }>('/api/admin/users'),
+    retry: false,
+  });
 
   async function refresh() {
     await Promise.all([
@@ -98,6 +103,29 @@ export default function Admin() {
       queryClient.invalidateQueries({ queryKey: ['backups'] }),
       queryClient.invalidateQueries({ queryKey: ['metadata-quality'] }),
     ]);
+  }
+
+  async function renameHousehold(id: string, currentName: string) {
+    const name = window.prompt('Household name', currentName)?.trim();
+    if (!name || name === currentName) return;
+    try {
+      await api(`/api/admin/households/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+      await queryClient.invalidateQueries({ queryKey: ['admin-households'] });
+      toast.success('Household renamed');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not rename household');
+    }
+  }
+
+  async function removeHousehold(id: string, name: string) {
+    if (!window.confirm(`Remove empty household “${name}”?`)) return;
+    try {
+      await api(`/api/admin/households/${id}`, { method: 'DELETE' });
+      await queryClient.invalidateQueries({ queryKey: ['admin-households'] });
+      toast.success('Empty household removed');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not remove household');
+    }
   }
 
   async function saveProviders(providers: { provider: string; enabled: boolean; priority: number; settings: Record<string, unknown> }[]) {
@@ -278,13 +306,21 @@ export default function Admin() {
       {householdData?.households && (
         <section className="rounded-lg border border-border bg-card p-6">
           <h2 className="text-xl font-heading font-semibold">Households</h2>
-          <p className="mt-1 text-sm text-muted-foreground">System-wide inventory overview. Household administrators manage their own members and defaults in Settings.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Rename households here. Empty duplicate households can be removed; populated households must be reviewed rather than silently discarded.</p>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead><tr className="border-b border-border"><th className="p-2">Household</th><th className="p-2">Members</th><th className="p-2">Works</th><th className="p-2">Copies</th></tr></thead>
-              <tbody>{householdData.households.map(household => <tr key={household.id} className="border-b border-border last:border-0"><td className="p-2 font-medium">{household.name}</td><td className="p-2">{household.members}</td><td className="p-2">{household.works}</td><td className="p-2">{household.copies}</td></tr>)}</tbody>
+              <thead><tr className="border-b border-border"><th className="p-2">Household</th><th className="p-2">Members</th><th className="p-2">Works</th><th className="p-2">Copies</th><th className="p-2">Actions</th></tr></thead>
+              <tbody>{householdData.households.map(household => <tr key={household.id} className="border-b border-border last:border-0"><td className="p-2 font-medium">{household.name}</td><td className="p-2">{household.members}</td><td className="p-2">{household.works}</td><td className="p-2">{household.copies}</td><td className="flex gap-2 p-2"><Button type="button" size="sm" variant="outline" onClick={() => void renameHousehold(household.id, household.name)}><Pencil className="mr-1 h-3.5 w-3.5" />Rename</Button><Button type="button" size="sm" variant="destructive" disabled={Boolean(household.members || household.works || household.copies)} onClick={() => void removeHousehold(household.id, household.name)}><Trash2 className="mr-1 h-3.5 w-3.5" />Remove</Button></td></tr>)}</tbody>
             </table>
           </div>
+        </section>
+      )}
+
+      {allUsers?.users && (
+        <section className="rounded-lg border border-border bg-card p-6">
+          <h2 className="text-xl font-heading font-semibold">Users across households</h2>
+          <p className="mt-1 text-sm text-muted-foreground">This system-wide view helps identify users left in an older household after migration.</p>
+          <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b border-border"><th className="p-2">Name</th><th className="p-2">Email</th><th className="p-2">Household</th><th className="p-2">Role</th><th className="p-2">Status</th></tr></thead><tbody>{allUsers.users.map(member => <tr key={member.id} className="border-b border-border last:border-0"><td className="p-2 font-medium">{member.name}</td><td className="p-2">{member.email}</td><td className="p-2">{member.householdName}</td><td className="p-2">{member.householdRole || '—'}</td><td className="p-2">{member.disabled ? 'Disabled' : 'Active'}</td></tr>)}</tbody></table></div>
         </section>
       )}
 

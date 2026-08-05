@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { Book, Filter, Grid3X3, Headphones, List, Plus, ScanLine, Search, TableProperties, Tablet } from 'lucide-react';
+import { Book, Filter, Grid3X3, Headphones, List, Plus, ScanLine, Search, TableProperties, Tablet, Trash2 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import BookCard from '@/components/BookCard';
@@ -21,12 +21,12 @@ type Preferences = {
 };
 type Location = { id: string; breadcrumb: string; levelType: string };
 
-const defaultColumns = ['cover', 'title', 'author', 'series', 'isbn', 'edition', 'owner', 'location', 'format', 'condition', 'readingStatus', 'loan'];
+const defaultColumns = ['cover', 'title', 'author', 'series', 'isbn', 'edition', 'estimatedValue', 'owner', 'location', 'format', 'condition', 'readingStatus', 'loan'];
 const columnLabels: Record<string, string> = {
   cover: 'Cover', title: 'Title', author: 'Author', series: 'Series', isbn: 'ISBN',
   edition: 'Edition', copies: 'Copies', owner: 'Owner', location: 'Location',
   format: 'Format', condition: 'Condition', readingStatus: 'Reading status',
-  rating: 'Rating', loan: 'Loan', dateAdded: 'Date added',
+  rating: 'Rating', estimatedValue: 'Estimated price', loan: 'Loan', dateAdded: 'Date added',
 };
 
 function Highlighted({ value, query }: { value?: string | number; query: string }) {
@@ -229,6 +229,24 @@ export default function Collection() {
     }
   }
 
+  async function bulkArchiveCopies() {
+    if (!selectedCopyIds.length) return;
+    const count = selectedCopyIds.length;
+    if (!window.confirm(`Remove ${count} selected ${count === 1 ? 'copy' : 'copies'} from the collection? This keeps history in the database.`)) return;
+    try {
+      await api('/api/catalog/copies/archive', {
+        method: 'POST',
+        body: JSON.stringify({ copyIds: selectedCopyIds }),
+      });
+      setSelectedCopyIds([]);
+      setBulkMode(false);
+      await queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      toast.success(`Removed ${count} ${count === 1 ? 'copy' : 'copies'} from the collection`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not remove selected copies');
+    }
+  }
+
   const collectionNames = useMemo(() => collectionsData?.collections.map(item => item.name) || [], [collectionsData]);
   const seriesNames = useMemo(() => seriesData?.series.map(item => item.name) || [], [seriesData]);
   const items = data?.items || [];
@@ -273,6 +291,7 @@ export default function Collection() {
             {(locationsData?.locations || []).map(location => <option key={location.id} value={location.id}>{location.breadcrumb}</option>)}
           </select>
           <Button type="button" size="sm" disabled={!selectedCopyIds.length} onClick={() => void bulkMoveCopies()}>Move selected copies</Button>
+          <Button type="button" size="sm" variant="destructive" disabled={!selectedCopyIds.length} onClick={() => void bulkArchiveCopies()}><Trash2 className="mr-1 h-4 w-4" />Remove selected</Button>
           <Button type="button" size="sm" variant="outline" onClick={() => setSelectedCopyIds(items.map(item => item.copyId).filter((value): value is string => Boolean(value)))}>Select this page</Button>
         </section>
       )}
@@ -516,6 +535,7 @@ export default function Collection() {
                       {column === 'series' && <Highlighted value={item.book.series ? `${item.book.series}${item.book.seriesNumber ? ` #${item.book.seriesNumber}` : ''}` : ''} query={deferredSearch} />}
                       {column === 'isbn' && <Highlighted value={item.book.isbn} query={deferredSearch} />}
                       {column === 'edition' && [item.book.binding && bindingLabels[item.book.binding], item.book.edition].filter(Boolean).join(' · ')}
+                      {column === 'estimatedValue' && (item.estimatedValue == null ? '—' : `${item.estimatedCurrency || 'USD'} ${item.estimatedValue.toFixed(2)}`)}
                       {column === 'copies' && `${item.counts?.workCopies || 0} / ${item.counts?.editions || 0} editions`}
                       {column === 'owner' && item.owner?.name}
                       {column === 'location' && <Highlighted value={item.storageLocation} query={deferredSearch} />}

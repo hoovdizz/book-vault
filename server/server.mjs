@@ -23,6 +23,7 @@ import {
 } from "./locations.mjs";
 import {
   archiveCatalogItem,
+  archiveCatalogItems,
   catalogItemDetail,
   catalogActivity,
   catalogStats,
@@ -1264,6 +1265,54 @@ async function api(req, res, url) {
     }));
     return send(res, 200, { households });
   }
+  if (url.pathname === "/api/admin/users" && req.method === "GET") {
+    if (!isSystemAdmin(userHousehold)) return send(res, 403, { error: "System administrator access required" });
+    const users = db.prepare(`
+      SELECT u.id, u.name, u.email, u.disabled AS user_disabled,
+        hm.household_id, hm.household_role, hm.disabled AS membership_disabled,
+        household.name AS household_name
+      FROM users u
+      LEFT JOIN household_members hm ON hm.user_id = u.id
+      LEFT JOIN households household ON household.id = hm.household_id
+      ORDER BY u.name COLLATE NOCASE, u.id
+    `).all().map(row => ({
+      id: String(row.id), name: row.name, email: row.email,
+      disabled: Boolean(row.user_disabled || row.membership_disabled),
+      householdId: row.household_id == null ? null : String(row.household_id),
+      householdName: row.household_name || "No household",
+      householdRole: row.household_role || null,
+    }));
+    return send(res, 200, { users });
+  }
+  const adminHouseholdMatch = url.pathname.match(/^\/api\/admin\/households\/([1-9]\d*)$/);
+  if (adminHouseholdMatch && (req.method === "PATCH" || req.method === "DELETE")) {
+    if (!isSystemAdmin(userHousehold)) return send(res, 403, { error: "System administrator access required" });
+    const householdId = Number(adminHouseholdMatch[1]);
+    const target = db.prepare("SELECT id, name FROM households WHERE id = ?").get(householdId);
+    if (!target) return send(res, 404, { error: "Household not found" });
+    if (req.method === "PATCH") {
+      const input = await jsonBody(req);
+      const name = boundedText(input.name, 100, true);
+      if (!name) return send(res, 400, { error: "Household name is required" });
+      db.prepare("UPDATE households SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(name, householdId);
+      writeAuditEvent(db, { householdId, actorUserId: user.id, eventType: "household_renamed", targetType: "household", targetId: householdId, address: clientAddress(req), details: { name } });
+      return send(res, 200, { household: { id: String(householdId), name } });
+    }
+    const counts = db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM household_members WHERE household_id = ?) AS members,
+        (SELECT COUNT(*) FROM works WHERE household_id = ? AND archived_at IS NULL) AS works,
+        (SELECT COUNT(*) FROM editions WHERE household_id = ? AND archived_at IS NULL) AS editions,
+        (SELECT COUNT(*) FROM copies WHERE household_id = ? AND archived_at IS NULL) AS copies,
+        (SELECT COUNT(*) FROM list_entries WHERE household_id = ? AND archived_at IS NULL) AS lists
+    `).get(householdId, householdId, householdId, householdId, householdId);
+    if (counts.members || counts.works || counts.editions || counts.copies || counts.lists) {
+      return send(res, 409, { error: "Only an empty household can be removed", counts });
+    }
+    db.prepare("DELETE FROM households WHERE id = ?").run(householdId);
+    writeAuditEvent(db, { actorUserId: user.id, eventType: "household_removed", targetType: "household", targetId: householdId, address: clientAddress(req) });
+    return send(res, 200, { removed: true, id: String(householdId) });
+  }
   if (url.pathname === "/api/admin/integrity" && req.method === "POST") {
     assertHouseholdAdmin(userHousehold);
     const result = await integrityCheck(db);
@@ -1813,6 +1862,7 @@ async function api(req, res, url) {
       readStatus: url.searchParams.get("readStatus"),
       ownership: url.searchParams.get("ownership"),
       owner: url.searchParams.get("owner"),
+      requester: url.searchParams.get("requester"),
       locationId: url.searchParams.get("locationId"),
       sort: url.searchParams.get("sort"),
       direction: url.searchParams.get("direction"),
@@ -1875,6 +1925,19 @@ async function api(req, res, url) {
       targetId: result.locationId,
       address: clientAddress(req),
       details: { copyCount: result.moved },
+    });
+    return send(res, 200, result);
+  }
+  if (req.method === "POST" && url.pathname === "/api/catalog/copies/archive") {
+    const input = await jsonBody(req);
+    const result = archiveCatalogItems(db, userHousehold, user.id, input.copyIds);
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "catalog_copies_archived",
+      targetType: "copy_batch",
+      address: clientAddress(req),
+      details: { count: result.archived },
     });
     return send(res, 200, result);
   }

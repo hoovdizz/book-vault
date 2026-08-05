@@ -76,6 +76,8 @@ export interface UserBook {
   purchasePrice?: number | null;
   purchaseCurrency?: string | null;
   purchaseSource?: string | null;
+  estimatedValue?: number | null;
+  estimatedCurrency?: string | null;
   customBarcode?: string | null;
   storageLocation?: string;
   notes?: string;
