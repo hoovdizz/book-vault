@@ -1704,6 +1704,28 @@ export function seriesInventory(db, context) {
   };
 }
 
+export function deleteSeries(db, context, seriesId) {
+  if (!isHouseholdAdmin(context)) throw Object.assign(new Error("Household administrator access required"), { status: 403 });
+  const id = Number(seriesId);
+  if (!Number.isSafeInteger(id) || id < 1) throw Object.assign(new Error("Invalid series"), { status: 400 });
+  const series = db.prepare("SELECT id, name FROM series WHERE id = ? AND household_id = ?").get(id, context.household_id);
+  if (!series) throw Object.assign(new Error("Series not found"), { status: 404 });
+  const owned = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM work_series link
+    JOIN works work ON work.id = link.work_id
+    JOIN editions edition ON edition.work_id = work.id
+    JOIN copies copy ON copy.edition_id = edition.id
+    WHERE link.series_id = ? AND work.household_id = ?
+      AND work.archived_at IS NULL AND edition.archived_at IS NULL
+      AND copy.archived_at IS NULL AND copy.copy_status = 'active'
+  `).get(id, context.household_id).count;
+  if (owned) throw Object.assign(new Error("This series has collected books and cannot be deleted"), { status: 409, ownedCount: owned });
+  db.prepare("DELETE FROM work_series WHERE series_id = ?").run(id);
+  db.prepare("DELETE FROM series WHERE id = ? AND household_id = ?").run(id, context.household_id);
+  return { deleted: true, id: String(id), name: series.name };
+}
+
 export function catalogStats(db, householdId) {
   return db.prepare(`
     SELECT

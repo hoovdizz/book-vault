@@ -1,7 +1,10 @@
 import { useState } from 'react';
-import { BookOpen, ChevronDown, ChevronRight, Layers, Loader2, Plus, TriangleAlert } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronRight, Layers, Loader2, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { api } from '@/lib/auth';
+import { useAuth } from '@/lib/auth';
 import { UserBook } from '@/types/book';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -37,6 +40,8 @@ export default function SeriesPage() {
   const [editingBook, setEditingBook] = useState<UserBook | null>(null);
   const [opening, setOpening] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
   const { data, isLoading, error } = useQuery({
     queryKey: ['catalog-series'],
     queryFn: () => api<SeriesResponse>('/api/catalog/series'),
@@ -51,6 +56,18 @@ export default function SeriesPage() {
       setEditingBook(detail.item);
     } finally {
       setOpening('');
+    }
+  }
+
+  async function removeSeries(series: SeriesResponse['series'][number]) {
+    if (series.ownedWorkCount > 0) return;
+    if (!window.confirm(`Delete the empty series “${series.name}”? Wishlist entries will remain.`)) return;
+    try {
+      await api(`/api/catalog/series/${series.id}`, { method: 'DELETE' });
+      await queryClient.invalidateQueries({ queryKey: ['catalog-series'] });
+      toast.success(`Deleted ${series.name}`);
+    } catch (removeError) {
+      toast.error(removeError instanceof Error ? removeError.message : 'Could not delete series');
     }
   }
 
@@ -102,6 +119,18 @@ export default function SeriesPage() {
                       </Badge>
                     )}
                     {isCollapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                    {series.ownedWorkCount === 0 && (user?.role === 'admin' || user?.householdRole === 'household_admin') && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive"
+                        aria-label={`Delete empty series ${series.name}`}
+                        onClick={event => { event.stopPropagation(); void removeSeries(series); }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </button>
                 {!isCollapsed && (

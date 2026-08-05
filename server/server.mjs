@@ -33,6 +33,7 @@ import {
   listCatalog,
   moveCopies,
   seriesInventory,
+  deleteSeries,
   updateCatalogItem,
 } from "./catalog.mjs";
 import {
@@ -1916,6 +1917,20 @@ async function api(req, res, url) {
   }
   if (req.method === "GET" && url.pathname === "/api/catalog/series") {
     return send(res, 200, seriesInventory(db, userHousehold));
+  }
+  const seriesDeleteMatch = url.pathname.match(/^\/api\/catalog\/series\/([1-9]\d*)$/);
+  if (seriesDeleteMatch && req.method === "DELETE") {
+    const result = deleteSeries(db, userHousehold, Number(seriesDeleteMatch[1]));
+    writeAuditEvent(db, {
+      householdId: userHousehold.household_id,
+      actorUserId: user.id,
+      eventType: "series_deleted",
+      targetType: "series",
+      targetId: seriesDeleteMatch[1],
+      address: clientAddress(req),
+      details: { name: result.name },
+    });
+    return send(res, 200, result);
   }
   if (req.method === "POST" && url.pathname === "/api/catalog/duplicates") {
     const input = await jsonBody(req);
