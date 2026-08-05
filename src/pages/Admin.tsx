@@ -306,7 +306,7 @@ export default function Admin() {
       {householdData?.households && (
         <section className="rounded-lg border border-border bg-card p-6">
           <h2 className="text-xl font-heading font-semibold">Households</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Rename households here. Empty duplicate households can be removed; populated households must be reviewed rather than silently discarded.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Review and rename the households you administer. Empty duplicate households can be removed; populated households are protected from silent deletion.</p>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead><tr className="border-b border-border"><th className="p-2">Household</th><th className="p-2">Members</th><th className="p-2">Works</th><th className="p-2">Copies</th><th className="p-2">Actions</th></tr></thead>
@@ -319,7 +319,7 @@ export default function Admin() {
       {allUsers?.users && (
         <section className="rounded-lg border border-border bg-card p-6">
           <h2 className="text-xl font-heading font-semibold">Users across households</h2>
-          <p className="mt-1 text-sm text-muted-foreground">This system-wide view helps identify users left in an older household after migration.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Household administrators see their members here; system administrators can also identify users left in an older household after migration.</p>
           <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b border-border"><th className="p-2">Name</th><th className="p-2">Email</th><th className="p-2">Household</th><th className="p-2">Role</th><th className="p-2">Status</th></tr></thead><tbody>{allUsers.users.map(member => <tr key={member.id} className="border-b border-border last:border-0"><td className="p-2 font-medium">{member.name}</td><td className="p-2">{member.email}</td><td className="p-2">{member.householdName}</td><td className="p-2">{member.householdRole || '—'}</td><td className="p-2">{member.disabled ? 'Disabled' : 'Active'}</td></tr>)}</tbody></table></div>
         </section>
       )}

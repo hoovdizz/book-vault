@@ -1246,7 +1246,7 @@ async function api(req, res, url) {
     return send(res, 200, await adminStatus(db, userHousehold));
   }
   if (url.pathname === "/api/admin/households" && req.method === "GET") {
-    if (!isSystemAdmin(userHousehold)) return send(res, 403, { error: "System administrator access required" });
+    if (!isHouseholdAdmin(userHousehold)) return send(res, 403, { error: "Household administrator access required" });
     const households = db.prepare(`
       SELECT household.id, household.name, household.created_at,
         (SELECT COUNT(*) FROM household_members member
@@ -1255,8 +1255,10 @@ async function api(req, res, url) {
           WHERE work.household_id = household.id AND work.archived_at IS NULL) AS works,
         (SELECT COUNT(*) FROM copies copy
           WHERE copy.household_id = household.id AND copy.archived_at IS NULL) AS copies
-      FROM households household ORDER BY household.name COLLATE NOCASE
-    `).all().map(household => ({
+      FROM households household
+      WHERE (? = 1 OR household.id = ?)
+      ORDER BY household.name COLLATE NOCASE
+    `).all(isSystemAdmin(userHousehold) ? 1 : 0, userHousehold.household_id).map(household => ({
       id: String(household.id),
       name: household.name,
       members: household.members,
@@ -1267,7 +1269,7 @@ async function api(req, res, url) {
     return send(res, 200, { households });
   }
   if (url.pathname === "/api/admin/users" && req.method === "GET") {
-    if (!isSystemAdmin(userHousehold)) return send(res, 403, { error: "System administrator access required" });
+    if (!isHouseholdAdmin(userHousehold)) return send(res, 403, { error: "Household administrator access required" });
     const users = db.prepare(`
       SELECT u.id, u.name, u.email, u.disabled AS user_disabled,
         hm.household_id, hm.household_role, hm.disabled AS membership_disabled,
@@ -1275,8 +1277,9 @@ async function api(req, res, url) {
       FROM users u
       LEFT JOIN household_members hm ON hm.user_id = u.id
       LEFT JOIN households household ON household.id = hm.household_id
+      WHERE (? = 1 OR hm.household_id = ?)
       ORDER BY u.name COLLATE NOCASE, u.id
-    `).all().map(row => ({
+    `).all(isSystemAdmin(userHousehold) ? 1 : 0, userHousehold.household_id).map(row => ({
       id: String(row.id), name: row.name, email: row.email,
       disabled: Boolean(row.user_disabled || row.membership_disabled),
       householdId: row.household_id == null ? null : String(row.household_id),
@@ -1287,8 +1290,11 @@ async function api(req, res, url) {
   }
   const adminHouseholdMatch = url.pathname.match(/^\/api\/admin\/households\/([1-9]\d*)$/);
   if (adminHouseholdMatch && (req.method === "PATCH" || req.method === "DELETE")) {
-    if (!isSystemAdmin(userHousehold)) return send(res, 403, { error: "System administrator access required" });
+    if (!isHouseholdAdmin(userHousehold)) return send(res, 403, { error: "Household administrator access required" });
     const householdId = Number(adminHouseholdMatch[1]);
+    if (!isSystemAdmin(userHousehold) && householdId !== userHousehold.household_id) {
+      return send(res, 403, { error: "You can only manage your own household" });
+    }
     const target = db.prepare("SELECT id, name FROM households WHERE id = ?").get(householdId);
     if (!target) return send(res, 404, { error: "Household not found" });
     if (req.method === "PATCH") {
@@ -1299,6 +1305,7 @@ async function api(req, res, url) {
       writeAuditEvent(db, { householdId, actorUserId: user.id, eventType: "household_renamed", targetType: "household", targetId: householdId, address: clientAddress(req), details: { name } });
       return send(res, 200, { household: { id: String(householdId), name } });
     }
+    if (!isSystemAdmin(userHousehold)) return send(res, 403, { error: "Only a system administrator can remove a household" });
     const counts = db.prepare(`
       SELECT
         (SELECT COUNT(*) FROM household_members WHERE household_id = ?) AS members,
