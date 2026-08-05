@@ -115,7 +115,7 @@ export default function SeriesPage() {
                   <div className="flex items-center gap-2">
                     {series.missingVolumes.length > 0 && (
                       <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-300">
-                        <TriangleAlert className="mr-1 h-3 w-3" />Missing {series.missingVolumes.join(', ')}
+                        <TriangleAlert className="mr-1 h-3 w-3" />Missing volumes: {series.missingVolumes.join(', ')}
                       </Badge>
                     )}
                     {isCollapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
@@ -152,7 +152,7 @@ export default function SeriesPage() {
                               {book.readingOrder != null && <Badge variant="outline">Read {book.readingOrder}</Badge>}
                               {book.role !== 'main' && <Badge variant="outline">{book.role}</Badge>}
                               <Badge variant={book.copyCount ? 'default' : 'outline'}>
-                                {book.copyCount ? `${book.copyCount} owned` : book.wishlisted ? 'Wishlist' : 'Missing'}
+                                {book.copyCount ? `${book.copyCount} owned` : book.wishlisted ? 'Wishlist' : <><TriangleAlert className="mr-1 inline h-3 w-3" />Missing</>}
                               </Badge>
                             </div>
                             <h3 className="line-clamp-2 font-heading font-semibold">{book.title}</h3>

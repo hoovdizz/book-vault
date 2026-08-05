@@ -1964,6 +1964,37 @@ async function api(req, res, url) {
     });
     return send(res, 200, result);
   }
+  if (req.method === "POST" && url.pathname === "/api/catalog/copies/reading") {
+    const input = await jsonBody(req);
+    const status = ["read", "unread", "backlog"].includes(input.status) ? input.status : null;
+    const ids = [...new Set((Array.isArray(input.copyIds) ? input.copyIds : []).map(Number))];
+    if (!status || !ids.length || ids.length > 500 || ids.some(id => !Number.isSafeInteger(id) || id < 1)) {
+      return send(res, 400, { error: "Select between 1 and 500 copies and choose read, unread, or backlog" });
+    }
+    const placeholders = ids.map(() => "?").join(",");
+    const works = db.prepare(`
+      SELECT DISTINCT copy.id, edition.work_id, edition.id AS edition_id
+      FROM copies copy JOIN editions edition ON edition.id = copy.edition_id
+      WHERE copy.household_id = ? AND copy.id IN (${placeholders})
+        AND copy.archived_at IS NULL AND copy.copy_status = 'active'
+    `).all(userHousehold.household_id, ...ids);
+    if (works.length !== ids.length) return send(res, 404, { error: "One or more copies were not found in this household" });
+    for (const work of works) {
+      if (status !== "backlog") {
+        updateReadingState(db, userHousehold, user.id, work.work_id, { status, editionId: work.edition_id });
+      } else if (!db.prepare(`
+        SELECT 1 FROM list_entries
+        WHERE household_id = ? AND requested_by = ? AND work_id = ? AND list_type = 'backlog' AND archived_at IS NULL
+      `).get(userHousehold.household_id, user.id, work.work_id)) {
+        db.prepare(`
+          INSERT INTO list_entries (household_id, requested_by, work_id, edition_id, list_type, scope, preferred_formats, purchase_state)
+          VALUES (?, ?, ?, ?, 'backlog', 'personal', '["physical"]', 'wanted')
+        `).run(userHousehold.household_id, user.id, work.work_id, work.edition_id);
+      }
+    }
+    writeAuditEvent(db, { householdId: userHousehold.household_id, actorUserId: user.id, eventType: "bulk_reading_updated", targetType: "copy_batch", address: clientAddress(req), details: { count: ids.length, status } });
+    return send(res, 200, { updated: works.length, status });
+  }
   if (req.method === "POST" && url.pathname === "/api/catalog/batch") {
     const input = await jsonBody(req, maxBulkBodyBytes);
     if (!Array.isArray(input.entries) || !input.entries.length || input.entries.length > 100) {

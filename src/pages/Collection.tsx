@@ -247,6 +247,23 @@ export default function Collection() {
     }
   }
 
+  async function bulkReading(status: 'read' | 'backlog' | 'unread') {
+    if (!selectedCopyIds.length) return;
+    const count = selectedCopyIds.length;
+    try {
+      await api('/api/catalog/copies/reading', {
+        method: 'POST',
+        body: JSON.stringify({ copyIds: selectedCopyIds, status }),
+      });
+      setSelectedCopyIds([]);
+      setBulkMode(false);
+      await queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      toast.success(`Marked ${count} ${count === 1 ? 'copy' : 'copies'} as ${status === 'backlog' ? 'backlog' : status}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not update reading status');
+    }
+  }
+
   const collectionNames = useMemo(() => collectionsData?.collections.map(item => item.name) || [], [collectionsData]);
   const seriesNames = useMemo(() => seriesData?.series.map(item => item.name) || [], [seriesData]);
   const items = data?.items || [];
@@ -291,6 +308,9 @@ export default function Collection() {
             {(locationsData?.locations || []).map(location => <option key={location.id} value={location.id}>{location.breadcrumb}</option>)}
           </select>
           <Button type="button" size="sm" disabled={!selectedCopyIds.length} onClick={() => void bulkMoveCopies()}>Move selected copies</Button>
+          <Button type="button" size="sm" variant="outline" disabled={!selectedCopyIds.length} onClick={() => void bulkReading('read')}>Mark read</Button>
+          <Button type="button" size="sm" variant="outline" disabled={!selectedCopyIds.length} onClick={() => void bulkReading('backlog')}>Add to backlog</Button>
+          <Button type="button" size="sm" variant="outline" disabled={!selectedCopyIds.length} onClick={() => void bulkReading('unread')}>Mark unread</Button>
           <Button type="button" size="sm" variant="destructive" disabled={!selectedCopyIds.length} onClick={() => void bulkArchiveCopies()}><Trash2 className="mr-1 h-4 w-4" />Remove selected</Button>
           <Button type="button" size="sm" variant="outline" onClick={() => setSelectedCopyIds(items.map(item => item.copyId).filter((value): value is string => Boolean(value)))}>Select this page</Button>
         </section>
