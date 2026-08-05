@@ -1198,7 +1198,7 @@ export function catalogItemDetail(db, context, userId, kind, entityId) {
   if (!Number.isSafeInteger(id) || !["copy", "list"].includes(kind)) {
     throw Object.assign(new Error("Invalid catalog item"), { status: 400 });
   }
-  const parameters = [userId, context.household_id, userId, context.household_id, userId, userId, kind, id];
+  const parameters = [userId, context.household_id, userId, context.household_id, userId, userId, userId, kind, id];
   const row = db.prepare(`
     WITH item_rows AS (${itemRowsSql})
     SELECT * FROM item_rows WHERE entity_type = ? AND entity_id = ?
