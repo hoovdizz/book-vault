@@ -1,9 +1,10 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { BookOpen, Camera, Check, ImageOff, Loader2, Search } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/auth';
 import { BookBinding, BookCondition, BookFormat, BookSearchResult, CoverOption } from '@/types/book';
+import { LibrarySettings } from '@/types/settings';
 import { bindingLabels, conditionLabels } from '@/lib/book-copy';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -49,6 +50,7 @@ type Draft = {
   formats: BookFormat[];
   binding: BookBinding | '';
   edition: string;
+  storageLocation: string;
   conditionGrade: BookCondition | '';
   conditionNotes: string;
   loanedOut: boolean;
@@ -75,6 +77,7 @@ const emptyDraft: Draft = {
   formats: ['physical'],
   binding: '',
   edition: '',
+  storageLocation: '',
   conditionGrade: '',
   conditionNotes: '',
   loanedOut: false,
@@ -158,6 +161,31 @@ export default function AddBookDialog({
   const [searched, setSearched] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const { data: settingsData } = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => api<{ settings: LibrarySettings }>('/api/settings'),
+    enabled: open,
+  });
+  const settings = settingsData?.settings;
+
+  function withDefaults(value: Draft): Draft {
+    return {
+      ...value,
+      binding: value.binding || settings?.defaultBinding || '',
+      storageLocation: value.storageLocation || (isWishlist ? '' : settings?.defaultLocation || ''),
+      conditionGrade: value.conditionGrade || (isWishlist ? '' : settings?.defaultCondition || ''),
+    };
+  }
+
+  useEffect(() => {
+    if (!open || !settings) return;
+    setDraft(current => ({
+      ...current,
+      binding: current.binding || settings.defaultBinding,
+      storageLocation: current.storageLocation || (isWishlist ? '' : settings.defaultLocation),
+      conditionGrade: current.conditionGrade || (isWishlist ? '' : settings.defaultCondition),
+    }));
+  }, [open, settings, isWishlist]);
 
   const sourceMessage = useMemo(() => {
     if (!providers) return '';
@@ -180,7 +208,7 @@ export default function AddBookDialog({
     setResults([]);
     setProviders(null);
     setSearched(false);
-    setDraft(emptyDraft);
+    setDraft(withDefaults({ ...emptyDraft }));
     setScannerOpen(false);
   }
 
@@ -225,7 +253,7 @@ export default function AddBookDialog({
   }
 
   function selectResult(result: BookSearchResult) {
-    setDraft({
+    setDraft(withDefaults({
       title: result.title,
       author: result.author,
       isbn: result.isbn || '',
@@ -244,12 +272,13 @@ export default function AddBookDialog({
       formats: ['physical'],
       binding: '',
       edition: '',
+      storageLocation: '',
       conditionGrade: '',
       conditionNotes: '',
       loanedOut: false,
       loanedTo: '',
       loanedAt: '',
-    });
+    }));
     setStep('details');
   }
 
@@ -257,7 +286,7 @@ export default function AddBookDialog({
     const compact = query.toUpperCase().replace(/[^0-9X]/g, '');
     const queryLooksLikeIsbn = /^(?:\d{9}[\dX]|\d{13})$/.test(compact);
     const useAsIsbn = searchType === 'isbn' || (searchType === 'auto' && queryLooksLikeIsbn);
-    setDraft({ ...emptyDraft, title: useAsIsbn ? '' : query.trim(), isbn: useAsIsbn ? query.trim() : '' });
+    setDraft(withDefaults({ ...emptyDraft, title: useAsIsbn ? '' : query.trim(), isbn: useAsIsbn ? query.trim() : '' }));
     setStep('details');
   }
 
@@ -499,6 +528,20 @@ export default function AddBookDialog({
                 </div>
                 {!isWishlist && (
                   <>
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="book-storage-location">Physical location</Label>
+                      <Input
+                        id="book-storage-location"
+                        list="book-storage-locations"
+                        maxLength={150}
+                        placeholder="e.g. Bookshelf in den or Tote in den"
+                        value={draft.storageLocation}
+                        onChange={event => update('storageLocation', event.target.value)}
+                      />
+                      <datalist id="book-storage-locations">
+                        {(settings?.locations || []).map(value => <option key={value} value={value} />)}
+                      </datalist>
+                    </div>
                     <div>
                       <Label htmlFor="book-condition">Condition</Label>
                       <select id="book-condition" value={draft.conditionGrade} onChange={event => update('conditionGrade', event.target.value as Draft['conditionGrade'])} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">

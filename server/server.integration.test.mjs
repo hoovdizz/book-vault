@@ -15,6 +15,7 @@ let server;
 let db;
 let baseUrl;
 let cookie;
+let defaultedBookId;
 
 beforeAll(async () => {
   // Start from the pre-copy-details schema so every API integration run also
@@ -88,8 +89,11 @@ describe("books API", () => {
 
   it("migrates existing databases with the copy-detail fields", () => {
     const columns = new Set(db.prepare("PRAGMA table_info(books)").all().map(column => column.name));
-    for (const column of ["binding", "edition", "condition_grade", "condition_notes", "loaned_out", "loaned_to", "loaned_at"]) {
+    for (const column of ["binding", "edition", "storage_location", "condition_grade", "condition_notes", "loaned_out", "loaned_to", "loaned_at"]) {
       expect(columns.has(column)).toBe(true);
+    }
+    for (const table of ["families", "family_members", "user_settings", "book_read_statuses"]) {
+      expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)?.name).toBe(table);
     }
   });
 
@@ -295,6 +299,233 @@ describe("books API", () => {
       headers: { Cookie: cookie },
     });
     expect(deletedBookResponse.status).toBe(404);
+  });
+
+  it("saves personal book defaults and applies them to new physical copies", async () => {
+    const settingsResponse = await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        defaultLocation: "Bookshelf in den",
+        defaultBinding: "paperback",
+        defaultCondition: "good",
+        locations: ["Bookshelf in den", "Tote in den", "Bookshelf in kids room"],
+      }),
+    });
+    expect(settingsResponse.status).toBe(200);
+    await expect(settingsResponse.json()).resolves.toMatchObject({
+      settings: {
+        defaultLocation: "Bookshelf in den",
+        defaultBinding: "paperback",
+        defaultCondition: "good",
+        locations: ["Bookshelf in den", "Tote in den", "Bookshelf in kids room"],
+        locationScope: "personal",
+      },
+    });
+
+    const createResponse = await fetch(`${baseUrl}/api/books`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        title: "Defaulted Family Book",
+        author: "BookVault",
+        status: "owned",
+        formats: ["physical"],
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json();
+    defaultedBookId = created.book.id;
+    expect(created.book).toMatchObject({
+      readStatus: "unread",
+      storageLocation: "Bookshelf in den",
+      conditionGrade: "good",
+      book: { binding: "paperback" },
+    });
+  });
+
+  it("shares family-owned books and locations while keeping reading state and wishlists personal", async () => {
+    const createFamilyUserResponse = await fetch(`${baseUrl}/api/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        name: "Family Reader",
+        email: "family-reader@bookvault.local",
+        password: "familypassword",
+        role: "user",
+      }),
+    });
+    expect(createFamilyUserResponse.status).toBe(201);
+    const familyUser = (await createFamilyUserResponse.json()).user;
+
+    const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "family-reader@bookvault.local", password: "familypassword" }),
+    });
+    expect(loginResponse.status).toBe(200);
+    const familyCookie = loginResponse.headers.get("set-cookie").split(";")[0];
+
+    const privateWishlistResponse = await fetch(`${baseUrl}/api/books`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        title: "Private Family Wishlist Book",
+        author: "BookVault",
+        status: "wishlist",
+        formats: ["physical"],
+      }),
+    });
+    expect(privateWishlistResponse.status).toBe(201);
+
+    const familyResponse = await fetch(`${baseUrl}/api/family`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        name: "Integration Family",
+        memberIds: [familyUser.id],
+      }),
+    });
+    expect(familyResponse.status).toBe(200);
+    await expect(familyResponse.json()).resolves.toMatchObject({
+      family: {
+        name: "Integration Family",
+        members: expect.arrayContaining([
+          expect.objectContaining({ email: process.env.ADMIN_EMAIL }),
+          expect.objectContaining({ email: "family-reader@bookvault.local" }),
+        ]),
+      },
+    });
+
+    const familySettingsResponse = await fetch(`${baseUrl}/api/settings`, {
+      headers: { Cookie: familyCookie },
+    });
+    expect(familySettingsResponse.status).toBe(200);
+    await expect(familySettingsResponse.json()).resolves.toMatchObject({
+      settings: {
+        defaultLocation: "",
+        locations: ["Bookshelf in den", "Tote in den", "Bookshelf in kids room"],
+        locationScope: "family",
+      },
+    });
+    const nonAdminFamilyUpdate = await fetch(`${baseUrl}/api/family`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: familyCookie },
+      body: JSON.stringify({ name: "Unauthorized Rename", memberIds: [familyUser.id] }),
+    });
+    expect(nonAdminFamilyUpdate.status).toBe(403);
+
+    const familyBooksResponse = await fetch(`${baseUrl}/api/books?q=Defaulted%20Family%20Book`, {
+      headers: { Cookie: familyCookie },
+    });
+    expect(familyBooksResponse.status).toBe(200);
+    const familyBooks = await familyBooksResponse.json();
+    expect(familyBooks.books).toHaveLength(1);
+    expect(familyBooks.books[0]).toMatchObject({
+      id: defaultedBookId,
+      readStatus: "unread",
+      shared: true,
+      canDelete: false,
+      owner: { name: "Integration Admin" },
+    });
+
+    const updateSharedResponse = await fetch(`${baseUrl}/api/books/${defaultedBookId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: familyCookie },
+      body: JSON.stringify({
+        title: "Defaulted Family Book",
+        author: "BookVault",
+        status: "owned",
+        readStatus: "read",
+        formats: ["physical"],
+        binding: "paperback",
+        storageLocation: "Tote in den",
+        conditionGrade: "good",
+      }),
+    });
+    expect(updateSharedResponse.status).toBe(200);
+    await expect(updateSharedResponse.json()).resolves.toMatchObject({
+      book: { readStatus: "read", storageLocation: "Tote in den", shared: true },
+    });
+    const moveSharedResponse = await fetch(`${baseUrl}/api/books/${defaultedBookId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: familyCookie },
+      body: JSON.stringify({
+        title: "Defaulted Family Book",
+        author: "BookVault",
+        status: "wishlist",
+        readStatus: "read",
+        formats: ["physical"],
+        binding: "paperback",
+        storageLocation: "Tote in den",
+        conditionGrade: "good",
+      }),
+    });
+    expect(moveSharedResponse.status).toBe(403);
+
+    const adminViewResponse = await fetch(`${baseUrl}/api/books?q=Defaulted%20Family%20Book`, {
+      headers: { Cookie: cookie },
+    });
+    const adminView = await adminViewResponse.json();
+    expect(adminView.books[0]).toMatchObject({
+      readStatus: "unread",
+      storageLocation: "Tote in den",
+      shared: false,
+      canDelete: true,
+    });
+
+    const privateWishlistView = await fetch(`${baseUrl}/api/books?q=Private%20Family%20Wishlist%20Book`, {
+      headers: { Cookie: familyCookie },
+    });
+    await expect(privateWishlistView.json()).resolves.toEqual({ books: [] });
+
+    const crossFamilyDelete = await fetch(`${baseUrl}/api/books/${defaultedBookId}`, {
+      method: "DELETE",
+      headers: { Cookie: familyCookie },
+    });
+    expect(crossFamilyDelete.status).toBe(404);
+
+    const familyDefaultsResponse = await fetch(`${baseUrl}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: familyCookie },
+      body: JSON.stringify({
+        defaultLocation: "Bookshelf in kids room",
+        defaultBinding: "hardcover",
+        defaultCondition: "like_new",
+        locations: ["Bookshelf in den", "Tote in den", "Bookshelf in kids room"],
+      }),
+    });
+    expect(familyDefaultsResponse.status).toBe(200);
+
+    const familyOwnedResponse = await fetch(`${baseUrl}/api/books`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: familyCookie },
+      body: JSON.stringify({
+        title: "Family Reader Owned Book",
+        author: "BookVault",
+        status: "owned",
+        formats: ["physical"],
+      }),
+    });
+    expect(familyOwnedResponse.status).toBe(201);
+    await expect(familyOwnedResponse.json()).resolves.toMatchObject({
+      book: {
+        storageLocation: "Bookshelf in kids room",
+        conditionGrade: "like_new",
+        book: { binding: "hardcover" },
+      },
+    });
+
+    const adminFamilyOwnedView = await fetch(`${baseUrl}/api/books?q=Family%20Reader%20Owned%20Book`, {
+      headers: { Cookie: cookie },
+    });
+    await expect(adminFamilyOwnedView.json()).resolves.toMatchObject({
+      books: [expect.objectContaining({
+        shared: true,
+        readStatus: "unread",
+        owner: expect.objectContaining({ name: "Family Reader" }),
+      })],
+    });
   });
 
   it("finds duplicate owned copies across ISBN, binding, and edition differences", async () => {

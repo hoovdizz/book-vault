@@ -15,6 +15,7 @@ export default function Collection() {
   const [search, setSearch] = useState('');
   const [formatFilter, setFormatFilter] = useState<BookFormat | null>(null);
   const [collectionFilter, setCollectionFilter] = useState<string | null>(null);
+  const [locationFilter, setLocationFilter] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [showAddBook, setShowAddBook] = useState(false);
   const [editingBook, setEditingBook] = useState<UserBook | null>(null);
@@ -33,11 +34,13 @@ export default function Collection() {
       ub.book.collection?.toLowerCase().includes(needle) ||
       ub.book.series?.toLowerCase().includes(needle) ||
       ub.book.edition?.toLowerCase().includes(needle) ||
+      ub.storageLocation?.toLowerCase().includes(needle) ||
       ub.loanedTo?.toLowerCase().includes(needle) ||
       ub.conditionNotes?.toLowerCase().includes(needle);
     const matchesFormat = !formatFilter || ub.formats.includes(formatFilter);
     const matchesCollection = !collectionFilter || ub.book.collection === collectionFilter;
-    return matchesSearch && matchesFormat && matchesCollection;
+    const matchesLocation = !locationFilter || ub.storageLocation === locationFilter;
+    return matchesSearch && matchesFormat && matchesCollection && matchesLocation;
   });
   const collections = useMemo(
     () => [...new Set(ownedBooks.map(item => item.book.collection).filter((value): value is string => Boolean(value)))].sort(),
@@ -45,6 +48,10 @@ export default function Collection() {
   );
   const seriesNames = useMemo(
     () => [...new Set(ownedBooks.map(item => item.book.series).filter((value): value is string => Boolean(value)))].sort(),
+    [ownedBooks],
+  );
+  const locations = useMemo(
+    () => [...new Set(ownedBooks.map(item => item.storageLocation).filter((value): value is string => Boolean(value)))].sort(),
     [ownedBooks],
   );
 
@@ -59,7 +66,7 @@ export default function Collection() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-heading font-bold text-foreground">Collection</h1>
-          <p className="text-muted-foreground mt-1">{ownedBooks.length} books in your vault</p>
+          <p className="text-muted-foreground mt-1">{ownedBooks.length} books in your {ownedBooks.some(book => book.shared) ? 'family vault' : 'vault'}</p>
         </div>
         <Button
           type="button"
@@ -77,7 +84,7 @@ export default function Collection() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search title, author, ISBN, collection, or series..."
+            placeholder="Search title, author, ISBN, series, or physical location..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-2 rounded-md bg-card border border-border text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -149,6 +156,20 @@ export default function Collection() {
                   {collection}
                 </Button>
               ))}
+            </>
+          )}
+          {locations.length > 0 && (
+            <>
+              <span className="ml-2 text-sm text-muted-foreground">Physical location:</span>
+              <select
+                aria-label="Filter by physical location"
+                value={locationFilter || ''}
+                onChange={event => setLocationFilter(event.target.value || null)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">All locations</option>
+                {locations.map(location => <option key={location} value={location}>{location}</option>)}
+              </select>
             </>
           )}
         </div>

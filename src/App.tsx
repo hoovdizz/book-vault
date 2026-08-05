@@ -31,7 +31,8 @@ const ProtectedApp = () => {
       {(() => {
         const pages: Record<string, React.ReactNode> = {
           "/": <Dashboard />, "/collection": <Collection />, "/backlog": <Backlog />,
-          "/wishlist": <Wishlist />, "/series": <SeriesPage />, "/duplicates": <Duplicates />, "/profile": <Profile />,
+          "/wishlist": <Wishlist />, "/series": <SeriesPage />, "/duplicates": <Duplicates />,
+          "/settings": <Profile />, "/profile": <Profile />,
         };
         return (
           <Suspense fallback={<div className="grid min-h-[50vh] place-items-center text-muted-foreground">Loading page…</div>}>

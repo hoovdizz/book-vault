@@ -2,7 +2,7 @@
 
 BookVault is a self-hosted personal book-library interface packaged as one lightweight container. The web app, API, authentication, and embedded SQLite database all run together; no separate database container is required.
 
-Collection, Series, Dashboard, Backlog, Wishlist, and Duplicate Finder all use books stored in SQLite and isolated per user.
+Collection, Series, Dashboard, Backlog, Wishlist, and Duplicate Finder all use books stored in SQLite. Libraries are isolated per user by default; optional families share owned physical books while keeping each member's reading state, Wishlist, and Backlog personal.
 
 ## Container settings
 
@@ -24,7 +24,7 @@ Collection, Series, Dashboard, Backlog, Wishlist, and Duplicate Finder all use b
 
 The database uses SQLite WAL mode, similar to the embedded-database approach used by Sonarr and Radarr. Back up the complete `/config` directory, including any `-wal` and `-shm` files.
 
-Container upgrades automatically add new book-copy fields to an existing database in place. Existing accounts, books, and sessions are retained; keeping a current `/config` backup before any upgrade is still recommended.
+Container upgrades automatically add new book-copy, settings, family, and per-reader status tables to an existing database in place. Existing accounts, books, reading states, and sessions are retained; keeping a current `/config` backup before any upgrade is still recommended.
 
 ## Install on Unraid
 
@@ -88,9 +88,11 @@ The admin environment variables create the first account only when the database 
 
 Open **Collection → Add Book** or **Wishlist → Add to Wishlist** and search with a title, ISBN-10, or ISBN-13. Select the camera button to scan the 978/979 ISBN barcode with a phone. Live scanning uses the rear camera over HTTPS; when BookVault is opened over plain HTTP, use **Take or choose barcode photo** instead. The photo is decoded locally in the browser and is never uploaded. Both add buttons use the same provider search, metadata, and cover-selection flow; the Wishlist button automatically saves the book with a wishlist status. Select a result, choose a cover, then optionally record its collection, series, series position, format, binding, and edition before saving. Use **Move to Collection** on a wishlist title after purchasing it; the change is persisted in SQLite.
 
-Select any saved book to open its editor. Use **Remove book** and confirm **Remove permanently** to delete that copy from BookVault. Removal is limited to the signed-in user's books and cannot be undone.
+Open **Settings → Library defaults** to choose the location, binding, and condition preselected for each new physical book. Enter saved physical locations one per line, such as `Bookshelf in den`, `Tote in den`, and `Bookshelf in kids room`. Each book can use a saved location or a new free-form location. Physical locations appear on book cards, are searchable, and can be used as a Collection filter.
 
-Click any persisted book card to edit its metadata, cover, format, Collection/Wishlist/Backlog location, and **Unread / Currently reading / Read** status. Each physical copy can also record its binding, edition, condition grade, free-form damage notes such as bent corners or a broken spine, and whether it is loaned out. A loan can include the borrower's name and loan date. Loaned books have a visible badge and are counted on the Dashboard. The **More** button in the editor repeats the provider lookup and adds newly found cover editions without discarding the current cover.
+Select any saved book to open its editor. Use **Remove book** and confirm **Remove permanently** to delete that copy from BookVault. In a family library, only the member who added a copy can remove it or move it out of the Collection; family members can update its physical details and their own reading status.
+
+Click any persisted book card to edit its metadata, cover, format, Collection/Wishlist/Backlog section, physical location, and **Unread / Currently reading / Read** status. Each physical copy can also record its binding, edition, condition grade, free-form damage notes such as bent corners or a broken spine, and whether it is loaned out. A loan can include the borrower's name and loan date. Loaned books have a visible badge and are counted on the Dashboard. The **More** button in the editor repeats the provider lookup and adds newly found cover editions without discarding the current cover.
 
 Open **Series → Add Book Series**, choose **Auto**, **Hardcover**, or **Open Library**, search by series name, and review the returned volumes. Hardcover is the preferred source for exact series positions and requires `HARDCOVER_API_TOKEN`. Auto tries Hardcover when configured and falls back to Open Library. Open Library positions are read from its series metadata when present; missing positions are inferred from publication order. Every position is populated and remains editable before import. Mark each new title as **Collection**, **Wishlist**, or **Skip**, or use the bulk selection buttons, then import the selected rows together. Existing ISBN/title matches are identified and are not duplicated.
 
@@ -120,8 +122,10 @@ Authenticated book endpoints:
 
 - `GET /api/book-search?q=...&type=auto|title|isbn` searches the metadata providers.
 - `GET /api/series-search?q=...&provider=auto|hardcover|open_library` finds and positions the books in a series using the selected source.
-- `GET /api/books?q=...` lists the signed-in user's books and optionally searches title, author, ISBN, collection, or series.
-- `GET /api/books/duplicates` scans the signed-in user's owned books for duplicate works across editions and bindings.
+- `GET /api/settings` and `PUT /api/settings` read or update personal defaults and the active library's saved locations.
+- `GET /api/family` reads the active family; administrator-only `PUT /api/family` creates it or updates its membership.
+- `GET /api/books?q=...` lists personal books plus family-owned books and optionally searches title, author, ISBN, collection, series, or physical location.
+- `GET /api/books/duplicates` scans the visible owned collection for duplicate works across editions and bindings.
 - `POST /api/books` validates and stores a book for the signed-in user.
 - `POST /api/books/bulk` validates and imports up to 100 reviewed series books.
 - `PUT /api/books/:id` updates one of the signed-in user's books and reading status.
@@ -275,7 +279,17 @@ The GitHub Actions workflow publishes `main` as `latest` and `development` as `d
 
 ## Add users
 
-Sign in as an administrator, open **Profile**, and use the **Users** form. New accounts may be regular users or administrators. Passwords are salted and hashed asynchronously with scrypt. Sessions use hashed server-side tokens and `HttpOnly`, `SameSite=Strict` cookies that expire after `SESSION_DAYS`.
+Sign in as an administrator, open **Settings**, and use the **Users** form. New accounts may be regular users or administrators. Passwords are salted and hashed asynchronously with scrypt. Sessions use hashed server-side tokens and `HttpOnly`, `SameSite=Strict` cookies that expire after `SESSION_DAYS`.
+
+### Share a family collection
+
+After creating the user accounts:
+
+1. Open **Settings → Family library** as an administrator.
+2. Enter a family name and select the accounts that should share the physical collection.
+3. Select **Create family** or **Update family**.
+
+Every selected member sees all books marked **Collection** by any family member. Wishlist and Backlog books remain visible only to the account that added them. Reading state is stored separately for each member, so one person can mark a shared book **Read** while another still sees it as **Unread**. Saved physical location names are shared across the family, but each member keeps their own default location, binding, and condition.
 
 ## Local development
 

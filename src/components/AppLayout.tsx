@@ -1,4 +1,4 @@
-import { Library, ListTodo, Heart, Layers, BarChart3, User, Search, Copy } from 'lucide-react';
+import { Library, ListTodo, Heart, Layers, BarChart3, Settings, Search, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Link, usePathname } from '@/lib/router';
 
@@ -54,11 +54,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         <div className="px-3 py-4 border-t border-sidebar-border">
           <Link
-            href="/profile"
+            href="/settings"
             className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
           >
-            <User className="h-4.5 w-4.5" />
-            Profile
+            <Settings className="h-4.5 w-4.5" />
+            Settings
           </Link>
         </div>
       </aside>
@@ -87,6 +87,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               {label}
             </Link>
           ))}
+          <Link
+            href="/settings"
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors',
+              pathname === '/settings' || pathname === '/profile'
+                ? 'bg-sidebar-accent text-sidebar-primary'
+                : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/50',
+            )}
+          >
+            <Settings className="h-3.5 w-3.5" />
+            Settings
+          </Link>
         </nav>
       </div>
 

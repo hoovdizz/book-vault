@@ -51,6 +51,9 @@ export interface UserBook {
   loanedOut: boolean;
   loanedTo?: string;
   loanedAt?: string;
+  owner?: { id: string; name: string };
+  shared?: boolean;
+  canDelete?: boolean;
   rating?: number;
   purchasePrice?: number;
   storageLocation?: string;

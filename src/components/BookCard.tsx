@@ -99,6 +99,11 @@ export default function BookCard({ userBook, compact, onSelect }: BookCardProps)
         <div className="p-3 space-y-1.5">
           <h3 className="font-heading font-semibold text-sm text-foreground leading-tight line-clamp-2">{book.title}</h3>
           <p className="text-xs text-muted-foreground">{book.author}</p>
+          {userBook.shared && (
+            <p className="text-[10px] font-medium text-primary">
+              Family copy · added by {userBook.owner?.name || 'another member'}
+            </p>
+          )}
 
           {book.series && (
             <p className="text-[10px] text-primary font-medium">

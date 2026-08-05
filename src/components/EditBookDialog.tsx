@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Check, ImageOff, Loader2, Search, Trash2 } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/auth';
 import { BookBinding, BookCondition, BookFormat, BookSearchResult, CoverOption, UserBook } from '@/types/book';
+import { LibrarySettings } from '@/types/settings';
 import { bindingLabels, conditionLabels } from '@/lib/book-copy';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -58,6 +59,7 @@ type Draft = {
   readStatus: 'read' | 'unread' | 'reading';
   binding: BookBinding | '';
   edition: string;
+  storageLocation: string;
   conditionGrade: BookCondition | '';
   conditionNotes: string;
   loanedOut: boolean;
@@ -98,6 +100,7 @@ function draftFromBook(userBook: UserBook): Draft {
     readStatus: userBook.readStatus,
     binding: book.binding || '',
     edition: book.edition || '',
+    storageLocation: userBook.storageLocation || '',
     conditionGrade: userBook.conditionGrade || '',
     conditionNotes: userBook.conditionNotes || '',
     loanedOut: userBook.loanedOut,
@@ -121,6 +124,11 @@ export default function EditBookDialog({
   const [deleting, setDeleting] = useState(false);
   const [findingCovers, setFindingCovers] = useState(false);
   const [failedCovers, setFailedCovers] = useState<Set<string>>(new Set());
+  const { data: settingsData } = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => api<{ settings: LibrarySettings }>('/api/settings'),
+    enabled: open,
+  });
 
   useEffect(() => {
     if (open && book) {
@@ -226,7 +234,9 @@ export default function EditBookDialog({
         <DialogHeader>
           <DialogTitle>Edit book</DialogTitle>
           <DialogDescription>
-            Update its metadata, cover, ownership, reading status, condition, and loan details.
+            {book?.shared
+              ? `This family copy was added by ${book.owner?.name || 'another member'}. Its physical details are shared, while the reading status below is yours alone.`
+              : 'Update its metadata, cover, ownership, reading status, condition, and loan details.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -300,15 +310,15 @@ export default function EditBookDialog({
                   <Input id="edit-author" required maxLength={300} value={draft.author} onChange={event => update('author', event.target.value)} />
                 </div>
                 <div>
-                  <Label htmlFor="edit-status">Location</Label>
-                  <select id="edit-status" value={draft.status} onChange={event => update('status', event.target.value as Draft['status'])} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                  <Label htmlFor="edit-status">Library section</Label>
+                  <select id="edit-status" value={draft.status} disabled={book?.shared} onChange={event => update('status', event.target.value as Draft['status'])} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50">
                     <option value="owned">Collection</option>
                     <option value="wishlist">Wishlist</option>
                     <option value="backlog">Backlog</option>
                   </select>
                 </div>
                 <div>
-                  <Label htmlFor="edit-read-status">Reading status</Label>
+                  <Label htmlFor="edit-read-status">Your reading status</Label>
                   <select id="edit-read-status" value={draft.readStatus} onChange={event => update('readStatus', event.target.value as Draft['readStatus'])} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                     <option value="unread">Unread</option>
                     <option value="reading">Currently reading</option>
@@ -362,6 +372,20 @@ export default function EditBookDialog({
                   <Label htmlFor="edit-edition">Edition</Label>
                   <Input id="edit-edition" maxLength={150} placeholder="e.g. First edition or Limited edition" value={draft.edition} onChange={event => update('edition', event.target.value)} />
                 </div>
+                <div className="sm:col-span-2">
+                  <Label htmlFor="edit-storage-location">Physical location</Label>
+                  <Input
+                    id="edit-storage-location"
+                    list="edit-storage-locations"
+                    maxLength={150}
+                    placeholder="e.g. Bookshelf in kids room or Tote in den"
+                    value={draft.storageLocation}
+                    onChange={event => update('storageLocation', event.target.value)}
+                  />
+                  <datalist id="edit-storage-locations">
+                    {(settingsData?.settings.locations || []).map(value => <option key={value} value={value} />)}
+                  </datalist>
+                </div>
                 <div>
                   <Label htmlFor="edit-condition">Condition</Label>
                   <select id="edit-condition" value={draft.conditionGrade} onChange={event => update('conditionGrade', event.target.value as Draft['conditionGrade'])} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
@@ -409,34 +433,36 @@ export default function EditBookDialog({
               </section>
             </div>
             <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button type="button" variant="destructive" disabled={saving || deleting}>
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Remove book
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Remove this book?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This permanently removes "{draft.title}" from BookVault. This action cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel disabled={deleting}>Keep book</AlertDialogCancel>
-                    <AlertDialogAction
-                      type="button"
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      disabled={deleting}
-                      onClick={() => void deleteBook()}
-                    >
-                      {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      Remove permanently
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              {book?.canDelete !== false ? (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button type="button" variant="destructive" disabled={saving || deleting}>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Remove book
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Remove this book?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This permanently removes "{draft.title}" from BookVault. This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel disabled={deleting}>Keep book</AlertDialogCancel>
+                      <AlertDialogAction
+                        type="button"
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        disabled={deleting}
+                        onClick={() => void deleteBook()}
+                      >
+                        {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Remove permanently
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              ) : <span className="text-xs text-muted-foreground">Only {book.owner?.name || 'the member who added this book'} can remove this family copy.</span>}
               <div className="flex flex-col-reverse gap-2 sm:flex-row">
                 <Button type="button" variant="outline" disabled={deleting} onClick={() => onOpenChange(false)}>Cancel</Button>
                 <Button type="submit" disabled={saving || deleting}>
