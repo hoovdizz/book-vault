@@ -8,11 +8,17 @@ import {
   normalizeHardcoverBooks,
   normalizeIsbn,
   normalizeOpenLibraryDocs,
+  seriesDisplayName,
 } from "./book-search.mjs";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("book search normalization", () => {
+  it("uses readable capitalization for search fallback series names", () => {
+    expect(seriesDisplayName("the wheel of time")).toBe("The Wheel of Time");
+    expect(seriesDisplayName("The Wheel of Time")).toBe("The Wheel of Time");
+  });
+
   it("normalizes and validates ISBN-10 and ISBN-13 checksums", () => {
     expect(normalizeIsbn("978-0-261-10357-3")).toBe("9780261103573");
     expect(normalizeIsbn("0-261-10357-1")).toBe("0261103571");

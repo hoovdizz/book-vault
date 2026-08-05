@@ -13,6 +13,19 @@ function cleanText(value, max = 5000) {
   return String(value || "").trim().slice(0, max);
 }
 
+export function seriesDisplayName(value) {
+  const clean = cleanText(value, 150).replace(/\s+/g, " ");
+  if (!clean) return "";
+  // Provider names retain their intentional casing. Normalize only all-lower/all-upper
+  // fallback values (usually the user's search text) into readable title case.
+  if (clean !== clean.toLocaleLowerCase() && clean !== clean.toLocaleUpperCase()) return clean;
+  const minor = new Set(["a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "the", "to"]);
+  return clean.toLocaleLowerCase().split(" ").map((word, index) => {
+    if (index > 0 && minor.has(word)) return word;
+    return word.replace(/[\p{L}]/u, letter => letter.toLocaleUpperCase());
+  }).join(" ");
+}
+
 function first(value) {
   return Array.isArray(value) ? value.find(Boolean) : value;
 }
@@ -405,7 +418,7 @@ function normalizeOpenLibrarySeries(payload, requestedSeries) {
   const exactName = candidateNames.find(value => value.toLocaleLowerCase() === requestedSeries.toLocaleLowerCase());
   const containingName = candidateNames.find(value =>
     value.toLocaleLowerCase().includes(requestedSeries.toLocaleLowerCase()));
-  const seriesName = exactName || containingName || requestedSeries;
+  const seriesName = seriesDisplayName(exactName || containingName || requestedSeries);
   return (payload?.docs || []).flatMap(document =>
     normalizeOpenLibraryDocs({ docs: [document] }).map(result => ({
       ...result,
@@ -428,7 +441,7 @@ async function lookupOpenLibrarySeries(query, timeoutMs) {
   const payload = await fetchJson(url, "Open Library", timeoutMs);
   const books = withInferredSeriesPositions(normalizeOpenLibrarySeries(payload, query));
   return {
-    seriesName: books[0]?.series || query,
+    seriesName: seriesDisplayName(books[0]?.series || query),
     books,
     provider: "Open Library",
   };
@@ -447,7 +460,7 @@ async function lookupHardcoverSeries(query, token, timeoutMs) {
   const exactIndex = searchResults.findIndex(result =>
     cleanText(result?.name, 150).toLocaleLowerCase() === query.toLocaleLowerCase());
   const id = ids[exactIndex >= 0 ? exactIndex : 0];
-  if (!id) return { seriesName: query, books: [], provider: "Hardcover" };
+  if (!id) return { seriesName: seriesDisplayName(query), books: [], provider: "Hardcover" };
   const seriesPayload = await hardcoverGraphql(`
     query BookVaultSeries($id: Int!) {
       series_by_pk(id: $id) {
@@ -508,7 +521,7 @@ async function lookupHardcoverSeries(query, token, timeoutMs) {
     },
   };
   return {
-    seriesName: cleanText(series?.name, 150) || query,
+    seriesName: seriesDisplayName(cleanText(series?.name, 150) || query),
     books: normalizeHardcoverBooks(booksPayload),
     provider: "Hardcover",
   };
