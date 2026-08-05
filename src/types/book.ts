@@ -4,6 +4,12 @@ export interface CoverOption {
   label: string;
 }
 
+export interface PriceOption {
+  amount: number;
+  currency: string;
+  label: string;
+}
+
 export type BookSource = 'google_books' | 'open_library' | 'manual';
 export type BookBinding = 'hardcover' | 'paperback' | 'mass_market_paperback' | 'library_binding' | 'spiral_bound' | 'other';
 export type BookCondition = 'new' | 'like_new' | 'good' | 'fair' | 'poor' | 'damaged';
@@ -41,6 +47,7 @@ export interface BookSearchResult extends Omit<Book, 'id'> {
   sourceId: string;
   identifiers?: string[];
   coverOptions: CoverOption[];
+  priceOptions?: PriceOption[];
 }
 
 export type BookFormat = 'physical' | 'ebook' | 'audiobook';

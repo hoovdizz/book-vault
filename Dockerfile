@@ -26,7 +26,7 @@ COPY server/book-search.mjs server/catalog.mjs server/covers.mjs \
      server/database.mjs server/data-transfer.mjs server/households.mjs \
      server/loans.mjs server/locations.mjs server/maintenance.mjs \
      server/metadata.mjs server/migrations.mjs server/organization.mjs \
-     server/reading.mjs server/restore-startup.mjs server/server.mjs ./server/
+     server/reading.mjs server/restore-startup.mjs server/server.mjs server/value.mjs ./server/
 COPY docker-entrypoint.sh /usr/local/bin/book-vault-entrypoint
 # npm is required only in the build stage. The runtime uses Node built-ins, so
 # remove npm/npx and their dependency tree from the published attack surface.

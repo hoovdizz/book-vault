@@ -17,6 +17,7 @@ Reading state and sessions belong to an individual person and a work or edition.
 - ISBN-10/ISBN-13, title, author, camera, USB, and Bluetooth scanner entry
 - Continuous batch scanning with editable review results and intentional duplicate-copy actions
 - Google Books and Open Library behind a configurable, cached provider interface
+- ISBN-based collection value estimates using provider prices when available, with binding-aware fallback estimates
 - Optional Hardcover enrichment for covers and series data
 - Hierarchical buildings, rooms, bookcases, shelves, and bins with printable QR labels
 - Cover, detailed, and compact catalog views with server pagination, saved filters, custom collections, tags, and custom fields
@@ -228,6 +229,8 @@ The publish workflow maps `main` to `latest` and `development` to `development`.
 3. Add adults, child profiles, viewers, or household administrators directly, or create a controlled one-time invitation.
 4. Open **Collection → Add book** for a single lookup, or **Batch scan** for continuous camera/USB/Bluetooth entry.
 5. Open **Administration** to configure provider order, define custom fields, import existing data, and create the first backup.
+
+Open **Statistics → Estimated collection value** to see the rough value of active owned copies. Use **Update ISBN estimates** to refresh editions that do not have a current estimate. Google Books retail/list prices are used when returned for the matching ISBN; otherwise Book Vault applies a conservative estimate based on binding, format, publication age, and page count. The estimate includes a low/high range and is informational, not an appraisal. Recorded purchase cost is shown separately. The total is reported in USD; estimates in other currencies remain visible in the currency breakdown but are excluded from the USD total.
 
 Camera access is requested only after selecting **Start live camera** in a scanner. This direct user action reliably opens the permission prompt on mobile Safari and Chromium. Live camera scanning requires HTTPS; a clearly labeled photo fallback remains available when the browser cannot grant a stream. The installed PWA has the same catalog and scanner workflows as the desktop view.
 

@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-export const DATABASE_SCHEMA_VERSION = 4;
+export const DATABASE_SCHEMA_VERSION = 5;
 
 function parseArray(value) {
   try {
@@ -158,6 +158,13 @@ function schemaSql() {
       last_refresh_at TEXT,
       field_provenance TEXT NOT NULL DEFAULT '{}',
       manual_overrides TEXT NOT NULL DEFAULT '[]',
+      estimated_value_cents INTEGER,
+      estimated_value_low_cents INTEGER,
+      estimated_value_high_cents INTEGER,
+      estimated_value_currency TEXT NOT NULL DEFAULT 'USD',
+      estimated_value_source TEXT,
+      estimated_value_confidence TEXT,
+      estimated_value_updated_at TEXT,
       legacy_fingerprint TEXT,
       archived_at TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -909,6 +916,7 @@ function addIndexes(db) {
     CREATE INDEX IF NOT EXISTS idx_editions_household_isbn10 ON editions(household_id, isbn10) WHERE isbn10 IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_editions_work ON editions(work_id, publication_date, id);
     CREATE INDEX IF NOT EXISTS idx_editions_provider ON editions(household_id, provider, provider_record_id);
+    CREATE INDEX IF NOT EXISTS idx_editions_value ON editions(household_id, estimated_value_updated_at, estimated_value_cents);
     CREATE INDEX IF NOT EXISTS idx_copies_inventory ON copies(household_id, copy_status, owner_user_id, location_id, format);
     CREATE INDEX IF NOT EXISTS idx_copies_edition_active ON copies(edition_id, archived_at, copy_status);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_copies_barcode ON copies(household_id, custom_barcode) WHERE custom_barcode IS NOT NULL;
@@ -997,6 +1005,21 @@ export function runMigrations({ db, databasePath, databaseExisted }) {
       name: "edition and list lookup performance indexes",
       backup: false,
       up() {
+        addIndexes(db);
+      },
+    },
+    {
+      version: 5,
+      name: "edition collection value estimates",
+      backup: false,
+      up() {
+        addColumn(db, "editions", "estimated_value_cents", "INTEGER");
+        addColumn(db, "editions", "estimated_value_low_cents", "INTEGER");
+        addColumn(db, "editions", "estimated_value_high_cents", "INTEGER");
+        addColumn(db, "editions", "estimated_value_currency", "TEXT NOT NULL DEFAULT 'USD'");
+        addColumn(db, "editions", "estimated_value_source", "TEXT");
+        addColumn(db, "editions", "estimated_value_confidence", "TEXT");
+        addColumn(db, "editions", "estimated_value_updated_at", "TEXT");
         addIndexes(db);
       },
     },

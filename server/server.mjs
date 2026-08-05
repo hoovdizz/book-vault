@@ -93,6 +93,7 @@ import {
   userPreferences,
 } from "./organization.mjs";
 import { isAllowedCoverUrl, lookupSeries, normalizeCoverUrl, normalizeIsbn } from "./book-search.mjs";
+import { collectionValue, refreshEditionValue, refreshMissingValues } from "./value.mjs";
 
 const port = Number(process.env.PORT || 8130);
 const host = process.env.HOST || "0.0.0.0";
@@ -1816,6 +1817,35 @@ async function api(req, res, url) {
       sort: url.searchParams.get("sort"),
       direction: url.searchParams.get("direction"),
     }));
+  }
+  if (req.method === "GET" && url.pathname === "/api/catalog/value") {
+    return send(res, 200, { value: collectionValue(db, userHousehold.household_id) });
+  }
+  if (req.method === "POST" && url.pathname === "/api/catalog/value") {
+    const input = await jsonBody(req);
+    if (!Number.isSafeInteger(Number(input.editionId))) return send(res, 400, { error: "A valid edition is required" });
+    const result = await refreshEditionValue(db, userHousehold, Number(input.editionId), {
+      googleApiKey: process.env.GOOGLE_BOOKS_API_KEY,
+      hardcoverToken: process.env.HARDCOVER_API_TOKEN,
+      timeoutMs: process.env.BOOK_LOOKUP_TIMEOUT_MS,
+    });
+    audit("edition_value_refreshed", req, { userId: user.id, editionId: input.editionId, source: result.source });
+    return send(res, 200, { estimate: result, value: collectionValue(db, userHousehold.household_id) });
+  }
+  if (req.method === "POST" && url.pathname === "/api/catalog/value/refresh") {
+    const limitKey = `${user.id}:${clientAddress(req)}`;
+    if (!consumeLimit(bookLookupAttempts, limitKey, 5, bookLookupWindowMs)) {
+      return send(res, 429, { error: "Too many value refreshes. Try again in a few minutes." }, { "Retry-After": "300" });
+    }
+    const input = await jsonBody(req);
+    const result = await refreshMissingValues(db, userHousehold, {
+      limit: input.limit,
+      googleApiKey: process.env.GOOGLE_BOOKS_API_KEY,
+      hardcoverToken: process.env.HARDCOVER_API_TOKEN,
+      timeoutMs: process.env.BOOK_LOOKUP_TIMEOUT_MS,
+    });
+    audit("collection_values_refreshed", req, { userId: user.id, refreshed: result.refreshed.length });
+    return send(res, 200, result);
   }
   if (req.method === "GET" && url.pathname === "/api/catalog/stats") {
     return send(res, 200, { stats: catalogStats(db, userHousehold.household_id) });

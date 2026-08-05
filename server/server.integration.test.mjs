@@ -919,7 +919,7 @@ describe("books API", () => {
         ready: true,
         database: {
           integrity: "ok",
-          databaseVersion: 4,
+          databaseVersion: 5,
         },
         manifest: { application: "Book Vault", includes: ["database", "covers"] },
       },

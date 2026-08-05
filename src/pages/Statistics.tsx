@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BarChart3, BookOpen, Clock3, Headphones, Library, Repeat2, Star, Target } from 'lucide-react';
+import { BarChart3, BookOpen, Clock3, DollarSign, Headphones, Library, RefreshCw, Repeat2, Star, Target } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
@@ -43,6 +43,17 @@ type Household = {
   mostShared: { label: string; count: number }[];
   recentlyAdded: { label: string; copies: number }[];
 };
+type CollectionValue = {
+  estimatedValue: number;
+  estimatedLow: number;
+  estimatedHigh: number;
+  purchaseCost: number;
+  totalCopies: number;
+  estimatedCopies: number;
+  missingEstimates: number;
+  unsupportedCurrencyCopies: number;
+  currencies: Record<string, number>;
+};
 
 function Bars({ rows }: { rows: { label: string; count: number }[] }) {
   const maximum = Math.max(1, ...rows.map(row => row.count));
@@ -71,6 +82,11 @@ export default function Statistics() {
     queryKey: ['household-statistics'],
     queryFn: () => api<Household>('/api/household/statistics'),
   });
+  const { data: collectionValue } = useQuery({
+    queryKey: ['collection-value'],
+    queryFn: () => api<{ value: CollectionValue }>('/api/catalog/value'),
+  });
+  const [refreshingValues, setRefreshingValues] = useState(false);
   const cards = [
     ['Completed', personal?.totals.booksCompleted || 0, BookOpen],
     ['Pages read', personal?.totals.pagesRead || 0, Library],
@@ -113,6 +129,24 @@ export default function Statistics() {
       toast.error(error instanceof Error ? error.message : 'Could not save reading goals');
     }
   }
+
+  async function refreshValues() {
+    setRefreshingValues(true);
+    try {
+      const result = await api<{ value: CollectionValue }>('/api/catalog/value/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ limit: 10 }),
+      });
+      queryClient.setQueryData(['collection-value'], { value: result.value });
+      toast.success('Updated ' + result.value.estimatedCopies + ' copy estimates');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not refresh collection values');
+    } finally {
+      setRefreshingValues(false);
+    }
+  }
+
+  const money = (amount: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(amount || 0);
 
   if (isLoading) return <div className="py-16 text-center text-muted-foreground">Calculating optional statistics…</div>;
   if (error) return <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-6 text-destructive">{error instanceof Error ? error.message : 'Could not load statistics'}</div>;
@@ -162,6 +196,26 @@ export default function Statistics() {
           </form>
         </section>
       </div>
+      <section className="rounded-lg border border-border bg-card p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 font-heading text-lg font-semibold"><DollarSign className="h-5 w-5 text-primary" />Estimated collection value</h2>
+            <p className="mt-1 text-sm text-muted-foreground">ISBN provider prices when available; otherwise a binding, age, and page-count estimate.</p>
+          </div>
+          <Button type="button" variant="outline" disabled={refreshingValues} onClick={() => void refreshValues()}>
+            <RefreshCw className={'mr-2 h-4 w-4 ' + (refreshingValues ? 'animate-spin' : '')} />Update 10 estimates
+          </Button>
+        </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <div><p className="text-2xl font-heading font-bold">{collectionValue?.value.estimatedValue == null ? '—' : money(collectionValue.value.estimatedValue)}</p><p className="text-xs text-muted-foreground">Estimated USD value</p></div>
+          <div><p className="text-2xl font-heading font-bold">{collectionValue?.value.estimatedLow == null ? '—' : money(collectionValue.value.estimatedLow) + '–' + money(collectionValue.value.estimatedHigh)}</p><p className="text-xs text-muted-foreground">Rough range</p></div>
+          <div><p className="text-2xl font-heading font-bold">{collectionValue?.value.purchaseCost == null ? '—' : money(collectionValue.value.purchaseCost)}</p><p className="text-xs text-muted-foreground">Recorded purchase cost</p></div>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          {collectionValue?.value.missingEstimates || 0} copies still need estimates. Values are informational and not a resale appraisal.
+          {(collectionValue?.value.unsupportedCurrencyCopies || 0) > 0 && ' ' + collectionValue.value.unsupportedCurrencyCopies + ' non-USD copies are excluded from the USD total.'}
+        </p>
+      </section>
       <section className="rounded-lg border border-border bg-card p-5">
         <h2 className="font-heading text-lg font-semibold">Household inventory</h2>
         <p className="mt-2 text-sm text-muted-foreground">

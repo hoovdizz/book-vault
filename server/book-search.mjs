@@ -136,6 +136,19 @@ function identifiersFromGoogle(volumeInfo) {
     .slice(0, 30);
 }
 
+function googlePriceOptions(saleInfo = {}) {
+  return [
+    [saleInfo.retailPrice, "Google Books retail price"],
+    [saleInfo.listPrice, "Google Books list price"],
+  ].flatMap(([price, label]) => {
+    const amount = Number(price?.amount);
+    const currency = cleanText(price?.currencyCode, 3).toUpperCase();
+    return Number.isFinite(amount) && amount > 0 && /^[A-Z]{3}$/.test(currency)
+      ? [{ amount, currency, label }]
+      : [];
+  });
+}
+
 export function normalizeGoogleVolumes(payload) {
   return (payload?.items || []).flatMap(item => {
     const info = item?.volumeInfo || {};
@@ -159,6 +172,7 @@ export function normalizeGoogleVolumes(payload) {
       series: undefined,
       seriesNumber: undefined,
       coverOptions: googleCoverOptions(info.imageLinks),
+      priceOptions: googlePriceOptions(item?.saleInfo),
     }];
   });
 }
@@ -232,6 +246,9 @@ function mergeResult(primary, secondary) {
     series: primary.series || secondary.series,
     seriesNumber: primary.seriesNumber || secondary.seriesNumber,
     coverOptions: uniqueCovers([...(primary.coverOptions || []), ...(secondary.coverOptions || [])]),
+    priceOptions: [...(primary.priceOptions || []), ...(secondary.priceOptions || [])]
+      .filter((price, index, all) => all.findIndex(candidate => candidate.amount === price.amount && candidate.currency === price.currency) === index)
+      .slice(0, 6),
   };
 }
 

@@ -514,6 +514,9 @@ export default function AddBookDialog({
                       <div className="flex flex-wrap gap-1">
                         <Badge variant="outline">{result.sourceLabel}</Badge>
                         {result.publishedYear && <Badge variant="secondary">{result.publishedYear}</Badge>}
+                        {result.priceOptions?.[0] && (
+                          <Badge variant="secondary">~{result.priceOptions[0].currency} {result.priceOptions[0].amount.toFixed(2)}</Badge>
+                        )}
                         {result.coverOptions.length > 1 && (
                           <Badge variant="secondary">{result.coverOptions.length} covers</Badge>
                         )}

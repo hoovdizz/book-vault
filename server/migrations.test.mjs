@@ -174,6 +174,10 @@ describe("versioned normalized migrations", () => {
       SELECT COUNT(*) AS count FROM sqlite_master
       WHERE type = 'index' AND name = 'idx_copies_edition_active'
     `).get().count).toBe(1);
+    const editionColumns = new Set(db.prepare("PRAGMA table_info(editions)").all().map(column => column.name));
+    expect(editionColumns.has("estimated_value_cents")).toBe(true);
+    expect(editionColumns.has("estimated_value_low_cents")).toBe(true);
+    expect(editionColumns.has("estimated_value_high_cents")).toBe(true);
     expect(db.prepare(`
       SELECT COUNT(*) AS count FROM work_series WHERE volume_label IN ('1.5', '2')
     `).get().count).toBe(2);
