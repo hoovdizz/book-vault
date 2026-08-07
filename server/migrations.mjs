@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-export const DATABASE_SCHEMA_VERSION = 6;
+export const DATABASE_SCHEMA_VERSION = 7;
 
 function parseArray(value) {
   try {
@@ -1049,6 +1049,15 @@ export function runMigrations({ db, databasePath, databaseExisted }) {
           );
           CREATE INDEX IF NOT EXISTS idx_maintenance_runs_household ON maintenance_runs(household_id, run_type, completed_at DESC);
         `);
+      },
+    },
+    {
+      version: 7,
+      name: "household member collection visibility",
+      backup: false,
+      up() {
+        addColumn(db, "household_members", "hide_collection", "INTEGER NOT NULL DEFAULT 0");
+        db.exec("CREATE INDEX IF NOT EXISTS idx_household_members_visibility ON household_members(household_id, hide_collection)");
       },
     },
   ];

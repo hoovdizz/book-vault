@@ -960,7 +960,7 @@ describe("books API", () => {
         ready: true,
         database: {
           integrity: "ok",
-          databaseVersion: 6,
+          databaseVersion: 7,
         },
         manifest: { application: "Book Vault", includes: ["database", "covers"] },
       },

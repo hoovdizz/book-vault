@@ -25,6 +25,7 @@ type Member = {
   systemRole: string;
   householdRole: 'household_admin' | 'adult' | 'child' | 'viewer';
   disabled: boolean;
+  hideCollection: boolean;
 };
 type HouseholdResponse = {
   household: {
@@ -450,8 +451,12 @@ export default function Profile() {
                   <Button type="button" size="sm" variant={member.disabled ? 'outline' : 'destructive'} onClick={() => void updateMember(member, { disabled: !member.disabled })}>
                     {member.disabled ? 'Enable' : 'Disable'}
                   </Button>
+                  <Button type="button" size="sm" variant={member.hideCollection ? 'default' : 'outline'} onClick={() => void updateMember(member, { hideCollection: !member.hideCollection })}>
+                    {member.hideCollection ? 'Show collection' : 'Hide collection'}
+                  </Button>
                 </>
               )}
+              {member.hideCollection && <p className="w-full text-xs text-muted-foreground">This member’s owned copies are hidden from the household collection view. Household administrators can still see them.</p>}
             </div>
           ))}
         </div>

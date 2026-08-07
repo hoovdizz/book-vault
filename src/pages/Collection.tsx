@@ -8,7 +8,7 @@ import EditBookDialog from '@/components/EditBookDialog';
 import BatchScanDialog from '@/components/BatchScanDialog';
 import { Button } from '@/components/ui/button';
 import { BookFormat, UserBook } from '@/types/book';
-import { api } from '@/lib/auth';
+import { api, useAuth } from '@/lib/auth';
 import { fetchCatalog } from '@/lib/catalog';
 import { bindingLabels, conditionLabels } from '@/lib/book-copy';
 
@@ -44,6 +44,7 @@ function Highlighted({ value, query }: { value?: string | number; query: string 
 }
 
 export default function Collection() {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const initialQuery = new URLSearchParams(window.location.search).get('q') || '';
   const [search, setSearch] = useState(initialQuery);
@@ -98,7 +99,7 @@ export default function Collection() {
     queryKey: ['household'],
     queryFn: () => api<{
       household: { name: string };
-      members: { id: number; name: string; disabled: boolean }[];
+      members: { id: number; name: string; disabled: boolean; hideCollection: boolean }[];
     }>('/api/household'),
   });
   const { data: collectionsData } = useQuery({
@@ -445,7 +446,7 @@ export default function Collection() {
               <option value="all">Entire {householdData?.household.name || 'household'} collection</option>
               <option value="mine">My personal collection</option>
               <option value="household">Shared household-owned copies</option>
-              {(householdData?.members || []).filter(member => !member.disabled).map(member => (
+              {(householdData?.members || []).filter(member => !member.disabled && (!member.hideCollection || member.id === Number(user?.id))).map(member => (
                 <option key={member.id} value={`member:${member.id}`}>{member.name}&apos;s collection</option>
               ))}
             </select>

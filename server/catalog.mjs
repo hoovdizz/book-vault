@@ -506,6 +506,10 @@ const itemRowsSql = `
     edition.provider_record_id,
     copy.owner_user_id,
     owner.name AS owner_name,
+    CASE WHEN copy.owner_user_id IS NOT NULL THEN COALESCE((
+      SELECT member.hide_collection FROM household_members member
+      WHERE member.household_id = copy.household_id AND member.user_id = copy.owner_user_id
+    ), 0) ELSE 0 END AS owner_hidden,
     copy.format,
     json_array(copy.format) AS formats_json,
     copy.location_id,
@@ -604,6 +608,7 @@ const itemRowsSql = `
     edition.provider_record_id,
     entry.requested_by AS owner_user_id,
     requester.name AS owner_name,
+    0 AS owner_hidden,
     NULL AS format,
     entry.preferred_formats AS formats_json,
     NULL AS location_id,
@@ -810,6 +815,10 @@ export function listCatalog(db, context, userId, options = {}) {
   if (locationId != null) assertLocationInHousehold(db, context.household_id, locationId);
   const filters = [];
   const parameters = [userId, context.household_id, userId, context.household_id, userId, userId, userId];
+  if (!isHouseholdAdmin(context)) {
+    filters.push("(owner_hidden = 0 OR owner_user_id = ?)");
+    parameters.push(userId);
+  }
   if (search) {
     const pattern = `%${search.replace(/[\\%_]/g, "\\$&")}%`;
     const normalizedSearch = search.replace(/[^0-9a-z]/g, "");

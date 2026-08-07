@@ -912,8 +912,8 @@ async function api(req, res, url) {
       `).run(name, email, passwordHash);
       userId = Number(result.lastInsertRowid);
       db.prepare(`
-        INSERT INTO household_members (household_id, user_id, household_role)
-        VALUES (?, ?, ?)
+        INSERT INTO household_members (household_id, user_id, household_role, hide_collection)
+        VALUES (?, ?, ?, 0)
       `).run(userHousehold.household_id, userId, householdRole);
       db.exec("COMMIT");
       writeAuditEvent(db, {
@@ -945,6 +945,7 @@ async function api(req, res, url) {
     const input = await jsonBody(req);
     const role = input.householdRole == null ? target.household_role : validatedHouseholdRole(input.householdRole);
     const disabled = input.disabled == null ? Boolean(target.disabled) : input.disabled === true;
+    const hideCollection = input.hideCollection == null ? Boolean(target.hide_collection) : input.hideCollection === true;
     if (!role) return send(res, 400, { error: "Invalid household role" });
     if (targetUserId === user.id && (disabled || role !== "household_admin")) {
       return send(res, 400, { error: "You cannot disable or demote your own administrator account" });
@@ -960,9 +961,9 @@ async function api(req, res, url) {
       if (activeAdmins <= 1) return send(res, 400, { error: "A household must retain at least one active administrator" });
     }
     db.prepare(`
-      UPDATE household_members SET household_role = ?, disabled = ?
+      UPDATE household_members SET household_role = ?, disabled = ?, hide_collection = ?
       WHERE household_id = ? AND user_id = ?
-    `).run(role, disabled ? 1 : 0, userHousehold.household_id, targetUserId);
+    `).run(role, disabled ? 1 : 0, hideCollection ? 1 : 0, userHousehold.household_id, targetUserId);
     if (disabled) db.prepare("DELETE FROM sessions WHERE user_id = ?").run(targetUserId);
     writeAuditEvent(db, {
       householdId: userHousehold.household_id,
@@ -971,7 +972,7 @@ async function api(req, res, url) {
       targetType: "user",
       targetId: targetUserId,
       address: clientAddress(req),
-      details: { householdRole: role, disabled },
+      details: { householdRole: role, disabled, hideCollection },
     });
     return send(res, 200, { members: householdMembers(db, userHousehold.household_id) });
   }

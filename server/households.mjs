@@ -14,6 +14,7 @@ export function householdContext(db, userId) {
       h.scheduled_backup,
       hm.household_role,
       hm.disabled AS membership_disabled,
+      hm.hide_collection,
       u.system_role,
       u.disabled AS user_disabled
     FROM household_members hm
@@ -102,6 +103,7 @@ export function householdMembers(db, householdId) {
       u.created_at,
       hm.household_role,
       hm.disabled AS membership_disabled,
+      hm.hide_collection,
       hm.joined_at
     FROM household_members hm
     JOIN users u ON u.id = hm.user_id
@@ -122,6 +124,7 @@ export function householdMembers(db, householdId) {
     systemRole: member.system_role,
     householdRole: member.household_role,
     disabled: Boolean(member.user_disabled || member.membership_disabled),
+    hideCollection: Boolean(member.hide_collection),
     joinedAt: member.joined_at,
     createdAt: member.created_at,
   }));
