@@ -59,6 +59,19 @@ describe("book search normalization", () => {
     expect(result.coverOptions[0].url).toMatch(/^https:\/\/books\.google\.com/);
   });
 
+  it("keeps series metadata and volume numbers from book providers", () => {
+    const [google] = normalizeGoogleVolumes({ items: [{ id: "series-book", volumeInfo: {
+      title: "Series Book", authors: ["Reader Author"],
+      seriesInfo: { seriesName: "reader series", bookDisplayNumber: "2" },
+    } }] });
+    expect(google).toMatchObject({ series: "Reader Series", seriesNumber: "2" });
+
+    const [openLibrary] = normalizeOpenLibraryDocs({ docs: [{
+      title: "Series Book", author_name: ["Reader Author"], series: ["reader series #3"],
+    }] });
+    expect(openLibrary).toMatchObject({ series: "Reader Series", seriesNumber: "3" });
+  });
+
   it("collects distinct Open Library edition covers", () => {
     const [result] = normalizeOpenLibraryDocs({
       docs: [{

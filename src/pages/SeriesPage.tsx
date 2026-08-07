@@ -151,7 +151,12 @@ export default function SeriesPage() {
                               {book.volume && <Badge variant="secondary">Volume {book.volume}</Badge>}
                               {book.readingOrder != null && <Badge variant="outline">Read {book.readingOrder}</Badge>}
                               {book.role !== 'main' && <Badge variant="outline">{book.role}</Badge>}
-                              <Badge variant={book.copyCount ? 'default' : 'outline'}>
+                              <Badge
+                                variant={book.copyCount ? 'default' : 'outline'}
+                                className={!book.copyCount && !book.wishlisted
+                                  ? 'border-amber-500/60 bg-amber-500/10 text-amber-800 dark:text-amber-300'
+                                  : undefined}
+                              >
                                 {book.copyCount ? `${book.copyCount} owned` : book.wishlisted ? 'Wishlist' : <><TriangleAlert className="mr-1 inline h-3 w-3" />Missing</>}
                               </Badge>
                             </div>

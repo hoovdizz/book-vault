@@ -169,6 +169,14 @@ export function normalizeGoogleVolumes(payload) {
     if (!title) return [];
     const identifiers = identifiersFromGoogle(info);
     const isbn = identifiers.find(value => value.length === 13) || identifiers[0];
+    const googleSeries = first([
+      info.series,
+      info.seriesName,
+      info.seriesInfo?.seriesName,
+    ]);
+    const googleSeriesNumber = info.seriesNumber
+      ?? info.seriesInfo?.bookDisplayNumber
+      ?? info.seriesInfo?.volumeNumber;
     return [{
       source: "google_books",
       sourceLabel: "Google Books",
@@ -182,8 +190,8 @@ export function normalizeGoogleVolumes(payload) {
       pageCount: Number.isInteger(info.pageCount) && info.pageCount > 0 ? info.pageCount : undefined,
       genre: cleanText(first(info.categories), 150) || undefined,
       description: cleanText(info.description, 5000) || undefined,
-      series: undefined,
-      seriesNumber: undefined,
+      series: seriesDisplayName(googleSeries) || undefined,
+      seriesNumber: googleSeriesNumber == null ? undefined : cleanText(googleSeriesNumber, 30),
       coverOptions: googleCoverOptions(info.imageLinks),
       priceOptions: googlePriceOptions(item?.saleInfo),
     }];
@@ -213,6 +221,8 @@ export function normalizeOpenLibraryDocs(payload, preferredIsbn = "") {
       ? [preferred, ...allIdentifiers.filter(value => value !== preferred)].slice(0, 30)
       : allIdentifiers.slice(0, 30);
     const isbn = identifiers.find(value => value.length === 13) || identifiers[0];
+    const rawSeries = first(document.series);
+    const series = seriesDisplayName(seriesBaseName(rawSeries));
     return [{
       source: "open_library",
       sourceLabel: "Open Library",
@@ -228,8 +238,8 @@ export function normalizeOpenLibraryDocs(payload, preferredIsbn = "") {
         : undefined,
       genre: cleanText(first(document.subject), 150) || undefined,
       description: cleanText(first(document.first_sentence), 5000) || undefined,
-      series: cleanText(first(document.series), 150) || undefined,
-      seriesNumber: undefined,
+      series: series || undefined,
+      seriesNumber: rawSeries ? inferredSeriesPosition(document.series, series, title) : undefined,
       coverOptions: openLibraryCovers(document),
     }];
   });
