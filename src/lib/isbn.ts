@@ -18,6 +18,9 @@ export function normalizeIsbn(value: unknown) {
 }
 
 export function isbnFromBarcode(value: unknown) {
-  const normalized = normalizeIsbn(value);
-  return normalized.length === 13 ? normalized : '';
+  const normalized = String(value || '').toUpperCase().replace(/[^0-9X]/g, '');
+  const candidates = [normalized, normalized.slice(0, 13)];
+  return candidates
+    .map(candidate => normalizeIsbn(candidate))
+    .find(candidate => candidate.length === 13) || '';
 }

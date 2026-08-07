@@ -119,13 +119,15 @@ export default function IsbnScannerDialog({
       }
       streamRef.current = stream;
 
-      const { BarcodeFormat, BrowserMultiFormatOneDReader, BrowserMultiFormatReader } = await import('@zxing/browser');
+      const { BarcodeFormat, BrowserMultiFormatReader } = await import('@zxing/browser');
       if (generation !== cameraGenerationRef.current || !videoRef.current) {
         stream.getTracks().forEach(track => track.stop());
         return;
       }
-      const reader = scanMode === 'location' ? new BrowserMultiFormatReader() : new BrowserMultiFormatOneDReader();
-      reader.possibleFormats = [scanMode === 'location' ? BarcodeFormat.QR_CODE : BarcodeFormat.EAN_13];
+      const reader = new BrowserMultiFormatReader();
+      reader.possibleFormats = scanMode === 'location'
+        ? [BarcodeFormat.QR_CODE]
+        : [BarcodeFormat.EAN_13, BarcodeFormat.UPC_A, BarcodeFormat.EAN_8, BarcodeFormat.CODE_128, BarcodeFormat.ITF, BarcodeFormat.RSS_14, BarcodeFormat.RSS_EXPANDED];
       const controls = await reader.decodeFromStream(stream, videoRef.current, result => {
         if (!result) return;
         const rawValue = result.getText();
@@ -205,9 +207,11 @@ export default function IsbnScannerDialog({
       });
       image.src = objectUrl;
       await loaded;
-      const { BarcodeFormat, BrowserMultiFormatOneDReader, BrowserMultiFormatReader } = await import('@zxing/browser');
-      const reader = scanMode === 'location' ? new BrowserMultiFormatReader() : new BrowserMultiFormatOneDReader();
-      reader.possibleFormats = [scanMode === 'location' ? BarcodeFormat.QR_CODE : BarcodeFormat.EAN_13];
+      const { BarcodeFormat, BrowserMultiFormatReader } = await import('@zxing/browser');
+      const reader = new BrowserMultiFormatReader();
+      reader.possibleFormats = scanMode === 'location'
+        ? [BarcodeFormat.QR_CODE]
+        : [BarcodeFormat.EAN_13, BarcodeFormat.UPC_A, BarcodeFormat.EAN_8, BarcodeFormat.CODE_128, BarcodeFormat.ITF, BarcodeFormat.RSS_14, BarcodeFormat.RSS_EXPANDED];
       const result = await reader.decodeFromImageElement(image);
       const rawValue = result.getText();
       if (scanMode === 'location') {
