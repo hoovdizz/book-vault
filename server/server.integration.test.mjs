@@ -745,6 +745,8 @@ describe("books API", () => {
     expect(duplicate.warnings[0]).toMatchObject({
       matchType: "exact_isbn",
       copyCount: 1,
+      hasOwnedCopies: true,
+      hasRequests: false,
       copies: [expect.objectContaining({ location: "Home / Shelf 4" })],
     });
 

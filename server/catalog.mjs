@@ -1028,8 +1028,7 @@ export function duplicateWarnings(db, context, input, viewerUserId = null) {
   );
   const inventory = locationInventory(db, context.household_id);
   const locationById = new Map(inventory.locations.map(location => [Number(location.id), location]));
-  return {
-    warnings: candidates.map(candidate => {
+  const warnings = candidates.map(candidate => {
       const copies = db.prepare(`
         SELECT copy.id, copy.owner_user_id, owner.name AS owner_name, copy.format,
           copy.location_id, copy.condition_grade, loan.id AS loan_id, loan.loan_status,
@@ -1072,14 +1071,16 @@ export function duplicateWarnings(db, context, input, viewerUserId = null) {
           coverUrl: candidate.cover_path ? `/api/covers/${candidate.edition_id}` : candidate.cover_url || null,
         },
         copyCount: copies.length,
+        hasOwnedCopies: copies.length > 0,
+        hasRequests: lists.length > 0,
         copies,
         lists,
         anotherHouseholdMemberOwnsIt: copies.some(copy =>
           copy.owner.id != null && (viewerUserId == null || Number(copy.owner.id) !== Number(viewerUserId))
         ),
       };
-    }),
-  };
+    }).filter(warning => warning.hasOwnedCopies || warning.hasRequests);
+  return { warnings };
 }
 
 export function moveCopies(db, context, userId, copyIds, locationId) {

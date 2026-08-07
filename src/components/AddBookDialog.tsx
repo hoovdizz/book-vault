@@ -49,6 +49,8 @@ type DuplicateWarning = {
     loan: { id: string; status: string; dueAt: string | null } | null;
   }[];
   lists: { id: string; type: string; requestedBy: { id: string; name: string } }[];
+  hasOwnedCopies: boolean;
+  hasRequests: boolean;
 };
 
 type Draft = {
@@ -541,7 +543,20 @@ export default function AddBookDialog({
           <form onSubmit={saveBook} className="space-y-6">
             {duplicateWarnings.length > 0 && !duplicateAction && (
               <section className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4" aria-live="polite">
-                <h3 className="font-heading font-semibold">This book may already be in the household</h3>
+                <h3 className="font-heading font-semibold">
+                  {duplicateWarnings.some(warning => warning.hasOwnedCopies)
+                    ? 'This book is already owned by the household'
+                    : duplicateWarnings.some(warning => warning.hasRequests)
+                      ? 'This book is requested, but no owned copies were found'
+                      : 'A matching catalog record was found'}
+                </h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {duplicateWarnings.some(warning => warning.hasOwnedCopies)
+                    ? 'Review the existing copies before adding another one.'
+                    : duplicateWarnings.some(warning => warning.hasRequests)
+                      ? 'You can move a wishlist request to the collection or add a new copy.'
+                      : 'No active owned copy is linked to this record yet.'}
+                </p>
                 {duplicateWarnings.slice(0, 3).map(warning => (
                   <div key={warning.edition.id} className="mt-3 flex gap-3 rounded-md bg-background/70 p-3">
                     <div className="h-20 w-14 flex-none overflow-hidden rounded bg-muted">
@@ -555,7 +570,13 @@ export default function AddBookDialog({
                         {[warning.edition.binding, warning.edition.label, warning.edition.isbn13 || warning.edition.isbn10]
                           .filter(Boolean).join(' · ')}
                       </p>
-                      <p>{warning.copyCount} owned {warning.copyCount === 1 ? 'copy' : 'copies'}</p>
+                      <p>
+                        {warning.copyCount > 0
+                          ? `${warning.copyCount} active owned ${warning.copyCount === 1 ? 'copy' : 'copies'}`
+                          : warning.lists.length > 0
+                            ? 'No active owned copies'
+                            : 'No active owned copy; metadata match only'}
+                      </p>
                       {warning.copies.map(copy => (
                         <p key={copy.id} className="text-xs text-muted-foreground">
                           {copy.owner.name} · {copy.format}{copy.location ? ` · ${copy.location}` : ''}{copy.loan ? ' · currently loaned' : ''}
