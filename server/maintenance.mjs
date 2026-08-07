@@ -485,6 +485,79 @@ export async function adminStatus(db, context) {
   };
 }
 
+function maintenanceCounts(db, householdId) {
+  const count = (query, ...parameters) => Number(db.prepare(query).get(...parameters)?.count || 0);
+  return {
+    orphanWorkSeries: count(`SELECT COUNT(*) AS count FROM work_series link LEFT JOIN works work ON work.id = link.work_id LEFT JOIN series ON series.id = link.series_id WHERE (work.id IS NULL OR series.id IS NULL) AND (work.household_id = ? OR series.household_id = ?)`, householdId, householdId),
+    orphanContributors: count(`SELECT COUNT(*) AS count FROM work_contributors link LEFT JOIN works work ON work.id = link.work_id LEFT JOIN contributors contributor ON contributor.id = link.contributor_id WHERE (work.id IS NULL OR contributor.id IS NULL) AND (work.household_id = ? OR contributor.household_id = ?)`, householdId, householdId),
+    orphanTags: count(`SELECT COUNT(*) AS count FROM work_tags link LEFT JOIN works work ON work.id = link.work_id LEFT JOIN tags tag ON tag.id = link.tag_id WHERE (work.id IS NULL OR tag.id IS NULL) AND (work.household_id = ? OR tag.household_id = ?)`, householdId, householdId),
+    orphanCollections: count(`SELECT COUNT(*) AS count FROM collection_works link LEFT JOIN works work ON work.id = link.work_id LEFT JOIN custom_collections collection ON collection.id = link.collection_id WHERE (work.id IS NULL OR collection.id IS NULL) AND (work.household_id = ? OR collection.household_id = ?)`, householdId, householdId),
+    orphanCustomFields: count(`SELECT COUNT(*) AS count FROM custom_field_values value LEFT JOIN custom_field_definitions definition ON definition.id = value.field_id WHERE definition.id IS NULL AND value.entity_id IN (SELECT id FROM works WHERE household_id = ? UNION SELECT id FROM editions WHERE household_id = ?)`, householdId, householdId),
+    orphanCopies: count(`SELECT COUNT(*) AS count FROM copies copy LEFT JOIN editions edition ON edition.id = copy.edition_id WHERE edition.id IS NULL AND copy.household_id = ?`, householdId),
+    orphanEditions: count(`SELECT COUNT(*) AS count FROM editions edition LEFT JOIN works work ON work.id = edition.work_id WHERE work.id IS NULL AND edition.household_id = ?`, householdId),
+    orphanLists: count(`SELECT COUNT(*) AS count FROM list_entries entry LEFT JOIN works work ON work.id = entry.work_id WHERE work.id IS NULL AND entry.household_id = ?`, householdId),
+  };
+}
+
+export function maintenanceStatus(db, context) {
+  assertHouseholdAdmin(context);
+  const last = db.prepare(`
+    SELECT id, status, details, started_at, completed_at FROM maintenance_runs
+    WHERE household_id = ? AND run_type = 'database_cleanup'
+    ORDER BY id DESC LIMIT 1
+  `).get(context.household_id);
+  return {
+    lastRun: last ? { id: String(last.id), status: last.status, details: parseJson(last.details, {}), startedAt: last.started_at, completedAt: last.completed_at } : null,
+    candidates: maintenanceCounts(db, context.household_id),
+  };
+}
+
+export async function runDatabaseMaintenance(db, context, userId, { scheduled = false } = {}) {
+  assertHouseholdAdmin(context);
+  const run = db.prepare(`INSERT INTO maintenance_runs (household_id, run_type, status) VALUES (?, 'database_cleanup', 'running')`).run(context.household_id);
+  const runId = Number(run.lastInsertRowid);
+  let backup = null;
+  try {
+    backup = await createBackup(db, context, userId, scheduled ? "maintenance" : "maintenance-manual");
+    const before = maintenanceCounts(db, context.household_id);
+    db.exec("BEGIN IMMEDIATE");
+    const statements = [
+      "DELETE FROM work_series WHERE work_id NOT IN (SELECT id FROM works) OR series_id NOT IN (SELECT id FROM series)",
+      "DELETE FROM work_contributors WHERE work_id NOT IN (SELECT id FROM works) OR contributor_id NOT IN (SELECT id FROM contributors)",
+      "DELETE FROM work_tags WHERE work_id NOT IN (SELECT id FROM works) OR tag_id NOT IN (SELECT id FROM tags)",
+      "DELETE FROM collection_works WHERE work_id NOT IN (SELECT id FROM works) OR collection_id NOT IN (SELECT id FROM custom_collections)",
+      "DELETE FROM custom_field_values WHERE field_id NOT IN (SELECT id FROM custom_field_definitions)",
+      "DELETE FROM copies WHERE edition_id NOT IN (SELECT id FROM editions)",
+      "DELETE FROM editions WHERE work_id NOT IN (SELECT id FROM works)",
+      "DELETE FROM list_entries WHERE work_id NOT IN (SELECT id FROM works)",
+    ];
+    for (const statement of statements) db.exec(statement);
+    db.exec("COMMIT");
+    db.exec("PRAGMA optimize");
+    db.exec("ANALYZE");
+    db.exec("VACUUM");
+    const integrity = await integrityCheck(db);
+    const after = maintenanceCounts(db, context.household_id);
+    const details = { backupId: backup.id, before, after, integrity: integrity.status };
+    db.prepare("UPDATE maintenance_runs SET status = ?, details = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?").run(integrity.status === "ok" ? "complete" : "failed", JSON.stringify(details), runId);
+    return { run: { id: String(runId), status: integrity.status === "ok" ? "complete" : "failed", details }, backup };
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch {}
+    db.prepare("UPDATE maintenance_runs SET status = 'failed', details = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?").run(JSON.stringify({ error: String(error.message || error).slice(0, 500), backupId: backup?.id || null }), runId);
+    throw error;
+  }
+}
+
+export async function runScheduledMaintenance(db) {
+  const households = db.prepare("SELECT id, created_by FROM households").all();
+  for (const household of households) {
+    const last = db.prepare(`SELECT completed_at FROM maintenance_runs WHERE household_id = ? AND run_type = 'database_cleanup' AND status = 'complete' ORDER BY completed_at DESC LIMIT 1`).get(household.id);
+    if (last?.completed_at && Date.now() - new Date(last.completed_at).getTime() < 7 * 86400000) continue;
+    const context = { household_id: household.id, household_role: "household_admin", system_role: "user" };
+    try { await runDatabaseMaintenance(db, context, household.created_by, { scheduled: true }); } catch {}
+  }
+}
+
 export async function runScheduledBackups(db) {
   const households = db.prepare(`
     SELECT id, created_by, scheduled_backup, backup_retention

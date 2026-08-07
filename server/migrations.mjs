@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-export const DATABASE_SCHEMA_VERSION = 5;
+export const DATABASE_SCHEMA_VERSION = 6;
 
 function parseArray(value) {
   try {
@@ -448,6 +448,15 @@ function schemaSql() {
       error_message TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       started_at TEXT,
+      completed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS maintenance_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      household_id INTEGER REFERENCES households(id) ON DELETE CASCADE,
+      run_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      details TEXT NOT NULL DEFAULT '{}',
+      started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       completed_at TEXT
     );
     CREATE TABLE IF NOT EXISTS audit_events (
@@ -1021,6 +1030,25 @@ export function runMigrations({ db, databasePath, databaseExisted }) {
         addColumn(db, "editions", "estimated_value_confidence", "TEXT");
         addColumn(db, "editions", "estimated_value_updated_at", "TEXT");
         addIndexes(db);
+      },
+    },
+    {
+      version: 6,
+      name: "database maintenance run history",
+      backup: false,
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS maintenance_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            household_id INTEGER REFERENCES households(id) ON DELETE CASCADE,
+            run_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            details TEXT NOT NULL DEFAULT '{}',
+            started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            completed_at TEXT
+          );
+          CREATE INDEX IF NOT EXISTS idx_maintenance_runs_household ON maintenance_runs(household_id, run_type, completed_at DESC);
+        `);
       },
     },
   ];

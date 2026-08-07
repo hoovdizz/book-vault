@@ -69,6 +69,9 @@ import {
   backupPath,
   createBackup,
   integrityCheck,
+  maintenanceStatus,
+  runDatabaseMaintenance,
+  runScheduledMaintenance,
   listBackups,
   previewRestore,
   runScheduledBackups,
@@ -1335,6 +1338,15 @@ async function api(req, res, url) {
     });
     return send(res, result.status === "ok" ? 200 : 500, result);
   }
+  if (url.pathname === "/api/admin/maintenance") {
+    assertHouseholdAdmin(userHousehold);
+    if (req.method === "GET") return send(res, 200, maintenanceStatus(db, userHousehold));
+    if (req.method === "POST") {
+      const result = await runDatabaseMaintenance(db, userHousehold, user.id);
+      writeAuditEvent(db, { householdId: userHousehold.household_id, actorUserId: user.id, eventType: "database_maintenance_completed", targetType: "database", address: clientAddress(req), details: { runId: result.run.id, integrity: result.run.details.integrity } });
+      return send(res, 200, result);
+    }
+  }
   if (url.pathname === "/api/admin/backups") {
     if (req.method === "GET") return send(res, 200, listBackups(db, userHousehold));
     if (req.method === "POST") {
@@ -2353,7 +2365,11 @@ export function startServer(listenPort = port, listenHost = host) {
       console.log(`BookVault listening on http://${listenHost}:${server.address().port}`);
       if (!maintenanceTimer) {
         void runScheduledBackups(db);
-        maintenanceTimer = setInterval(() => void runScheduledBackups(db), 60 * 60 * 1000);
+        void runScheduledMaintenance(db);
+        maintenanceTimer = setInterval(() => {
+          void runScheduledBackups(db);
+          void runScheduledMaintenance(db);
+        }, 60 * 60 * 1000);
         maintenanceTimer.unref();
       }
       resolveListen(server);

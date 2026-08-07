@@ -958,7 +958,7 @@ describe("books API", () => {
         ready: true,
         database: {
           integrity: "ok",
-          databaseVersion: 5,
+          databaseVersion: 6,
         },
         manifest: { application: "Book Vault", includes: ["database", "covers"] },
       },
@@ -977,5 +977,14 @@ describe("books API", () => {
     });
     expect(integrity.status).toBe(200);
     await expect(integrity.json()).resolves.toEqual({ status: "ok", messages: ["ok"] });
+
+    const maintenanceStatus = await fetch(`${baseUrl}/api/admin/maintenance`, { headers: { Cookie: cookie } });
+    expect(maintenanceStatus.status).toBe(200);
+    const maintenanceRun = await fetch(`${baseUrl}/api/admin/maintenance`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+    });
+    expect(maintenanceRun.status).toBe(200);
+    await expect(maintenanceRun.json()).resolves.toMatchObject({ run: { status: "complete" } });
   });
 });

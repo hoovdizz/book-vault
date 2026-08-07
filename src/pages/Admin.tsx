@@ -45,6 +45,10 @@ type ImportPreview = {
     duplicateCount: number;
   }[];
 };
+type Maintenance = {
+  lastRun: { status: string; completedAt: string | null; details: { before?: Record<string, number>; after?: Record<string, number>; integrity?: string } } | null;
+  candidates: Record<string, number>;
+};
 
 function bytes(value: number | null | undefined) {
   if (!value) return '0 B';
@@ -94,6 +98,11 @@ export default function Admin() {
   const { data: allUsers } = useQuery({
     queryKey: ['admin-users'],
     queryFn: () => api<{ users: { id: string; name: string; email: string; disabled: boolean; householdName: string; householdRole: string | null }[] }>('/api/admin/users'),
+    retry: false,
+  });
+  const { data: maintenance, refetch: refetchMaintenance } = useQuery({
+    queryKey: ['admin-maintenance'],
+    queryFn: () => api<Maintenance>('/api/admin/maintenance'),
     retry: false,
   });
 
@@ -195,6 +204,21 @@ export default function Admin() {
       toast.success(`Database integrity: ${result.status}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Integrity check failed');
+    } finally {
+      setWorking('');
+    }
+  }
+
+  async function runMaintenance() {
+    if (!window.confirm('Create a safety backup, remove orphaned database rows, optimize indexes, and vacuum SQLite now?')) return;
+    setWorking('maintenance');
+    try {
+      const result = await api<{ run: { status: string; details: { integrity?: string } } }>('/api/admin/maintenance', { method: 'POST' });
+      await refetchMaintenance();
+      await refresh();
+      toast.success(`Database cleanup finished (${result.run.details.integrity || result.run.status})`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Database cleanup failed');
     } finally {
       setWorking('');
     }
@@ -360,6 +384,22 @@ export default function Admin() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-xl font-heading font-semibold"><Database className="h-5 w-5" />Database cleanup</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Runs automatically every 7 days. It creates a backup, removes only orphaned tombstone rows, rebuilds statistics, vacuums SQLite, and verifies integrity.</p>
+          </div>
+          <Button type="button" variant="outline" disabled={Boolean(working)} onClick={() => void runMaintenance()}>
+            {working === 'maintenance' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Run cleanup now
+          </Button>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          {maintenance?.lastRun?.completedAt ? `Last run: ${new Date(maintenance.lastRun.completedAt).toLocaleString()} (${maintenance.lastRun.status})` : 'No cleanup has completed yet.'}
+          {' '}Orphan candidates: {Object.values(maintenance?.candidates || {}).reduce((total, value) => total + value, 0)}.
+        </p>
       </section>
 
       <section className="rounded-lg border border-border bg-card p-6">
