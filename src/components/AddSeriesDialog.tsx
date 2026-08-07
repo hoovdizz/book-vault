@@ -30,6 +30,21 @@ function rowKey(book: BookSearchResult, index: number) {
   return `${book.source}:${book.sourceId || identity(book)}:${index}`;
 }
 
+function canonicalSeriesName(result: SeriesResponse, searchText: string) {
+  const query = searchText.toLocaleLowerCase().replace(/\b(?:series|books?|saga|novels?)\b/g, '').replace(/[^\p{L}\p{Number}]+/gu, ' ').trim();
+  const counts = new Map<string, number>();
+  for (const book of result.books) {
+    const name = book.series?.trim();
+    if (!name) continue;
+    const normalized = name.toLocaleLowerCase();
+    if (query && !normalized.includes(query) && !query.includes(normalized)) continue;
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  return [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].length - right[0].length)[0]?.[0]
+    || result.seriesName.trim()
+    || searchText.trim();
+}
+
 export default function AddSeriesDialog({
   open,
   onOpenChange,
@@ -100,13 +115,14 @@ export default function AddSeriesDialog({
 
   async function importBooks() {
     if (!result) return;
+    const actualSeriesName = canonicalSeriesName(result, query);
     const selected = result.books.flatMap((book, index) => {
       const status = choices[rowKey(book, index)];
       if (status !== 'owned' && status !== 'wishlist') return [];
       return [{
         ...book,
         status,
-        series: result.seriesName,
+        series: actualSeriesName,
         seriesNumber: positions[rowKey(book, index)] || null,
         formats: ['physical'],
         readStatus: 'unread',
@@ -135,6 +151,10 @@ export default function AddSeriesDialog({
       await queryClient.invalidateQueries({ queryKey: ['catalog-series'] });
       const added = response.results.filter(item => item.state === 'success' && !item.skipped).length;
       const skipped = response.results.length - added;
+      const failures = response.results.filter(item => item.state === 'failure') as { state: string; error?: string }[];
+      if (failures.length && !added) {
+        throw new Error(failures[0].error || 'No series books could be saved');
+      }
       toast.success(`Added ${added} series book${added === 1 ? '' : 's'}${skipped ? `; ${skipped} already existed or were skipped` : ''}`);
       close(false);
     } catch (error) {
@@ -197,7 +217,7 @@ export default function AddSeriesDialog({
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 p-3">
               <div>
-                <h3 className="font-heading font-semibold">{result.seriesName}</h3>
+                <h3 className="font-heading font-semibold">{canonicalSeriesName(result, query)}</h3>
                 <p className="text-sm text-muted-foreground">{result.books.length} books found via {result.provider}</p>
                 {result.provider === 'Open Library' && (
                   <p className="mt-1 text-xs text-muted-foreground">Missing positions are inferred from publication order and can be corrected below.</p>

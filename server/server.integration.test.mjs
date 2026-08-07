@@ -806,6 +806,45 @@ describe("books API", () => {
     expect(householdCatalog.items[0].owner.name).toBe("Household");
   });
 
+  it("saves series entries through the batch workflow and returns them in series inventory", async () => {
+    const review = await fetch(`${baseUrl}/api/catalog/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ mode: "review", entries: [{
+        title: "Batch Series Volume One",
+        author: "Series Author",
+        status: "owned",
+        formats: ["physical"],
+        series: "Canonical Batch Series",
+        seriesNumber: "1",
+      }] }),
+    });
+    expect(review.status).toBe(200);
+    const reviewPayload = await review.json();
+    expect(reviewPayload.results[0].state).toBe("success");
+    const save = await fetch(`${baseUrl}/api/catalog/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ mode: "save", entries: [{
+        title: "Batch Series Volume One",
+        author: "Series Author",
+        status: "owned",
+        formats: ["physical"],
+        series: "Canonical Batch Series",
+        seriesNumber: "1",
+      }] }),
+    });
+    expect(save.status).toBe(207);
+    const savePayload = await save.json();
+    expect(savePayload.results[0].state).toBe("success");
+    const inventory = await fetch(`${baseUrl}/api/catalog/series`, { headers: { Cookie: cookie } });
+    expect(inventory.status).toBe(200);
+    const inventoryPayload = await inventory.json();
+    expect(inventoryPayload.series).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "Canonical Batch Series", ownedWorkCount: 1 }),
+    ]));
+  });
+
   it("keeps loan history and per-member private reading activity separate", async () => {
     const childCreate = await fetch(`${baseUrl}/api/household/members`, {
       method: "POST",
