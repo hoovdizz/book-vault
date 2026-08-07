@@ -845,6 +845,26 @@ describe("books API", () => {
     expect(inventoryPayload.series).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "Canonical Batch Series", ownedWorkCount: 1 }),
     ]));
+
+    const genreSeries = await fetch(`${baseUrl}/api/catalog`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        title: "Genre Series Book Two",
+        author: "Series Author",
+        genre: "series: the hidden series #2",
+        status: "owned",
+        formats: ["physical"],
+      }),
+    });
+    expect(genreSeries.status).toBe(201);
+    const refreshedInventory = await (await fetch(`${baseUrl}/api/catalog/series`, { headers: { Cookie: cookie } })).json();
+    expect(refreshedInventory.series).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "The Hidden Series",
+        books: expect.arrayContaining([expect.objectContaining({ volume: "2" })]),
+      }),
+    ]));
   });
 
   it("keeps loan history and per-member private reading activity separate", async () => {

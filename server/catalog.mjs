@@ -1,4 +1,4 @@
-import { normalizeIsbn } from "./book-search.mjs";
+import { normalizeIsbn, seriesDisplayName } from "./book-search.mjs";
 import { canEditInventory, canEditPersonalReading, isHouseholdAdmin } from "./households.mjs";
 import { assertLocationInHousehold, locationInventory } from "./locations.mjs";
 
@@ -83,7 +83,13 @@ function currentSeries(db, workId) {
 }
 
 function ensureSeries(db, householdId, workId, input) {
-  const name = text(input.series, 150);
+  const explicitSeries = text(input.series, 150);
+  const genreSeries = !explicitSeries
+    ? text(input.genre, 150)?.match(/^series\s*:\s*(.+)$/i)?.[1]?.trim() || ""
+    : "";
+  const rawSeries = explicitSeries || genreSeries;
+  const positionFromSeries = rawSeries.match(/(?:#|\bbook\s*|\bvol(?:ume)?\.?\s*)(\d+(?:\.\d+)?)\s*$/i)?.[1] || "";
+  const name = seriesDisplayName(rawSeries.replace(/\s*(?:#|\bbook\s*|\bvol(?:ume)?\.?\s*)\d+(?:\.\d+)?\s*$/i, "").trim());
   if (!name) return;
   const normalized = normalizedText(name);
   let series = db.prepare(`
@@ -94,7 +100,8 @@ function ensureSeries(db, householdId, workId, input) {
       INSERT INTO series (household_id, name, normalized_name) VALUES (?, ?, ?)
     `).run(householdId, name, normalized).lastInsertRowid) };
   }
-  const volumeLabel = text(input.seriesNumber, 30);
+  const volumeLabel = text(input.seriesNumber, 30) || positionFromSeries ||
+    text(input.title, 300)?.match(/(?:#|\bbook\s*|\bvol(?:ume)?\.?\s*)(\d+(?:\.\d+)?)\b/i)?.[1] || "";
   const numeric = Number(volumeLabel);
   const volumeSort = Number.isFinite(numeric) ? numeric : null;
   const readingOrderInput = input.readingOrder == null || input.readingOrder === "" ? volumeSort : Number(input.readingOrder);

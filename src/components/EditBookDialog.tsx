@@ -306,6 +306,11 @@ export default function EditBookDialog({
         method: 'PUT',
         body: JSON.stringify({
           ...draft,
+          // The current cached cover is served by Book Vault itself. Keep it
+          // unchanged instead of sending the internal /api/covers URL through
+          // the external-provider URL validator.
+          coverUrl: draft.coverUrl.startsWith('/api/covers/') ? undefined : draft.coverUrl,
+          coverOptions: draft.coverOptions.filter(option => !option.url.startsWith('/api/covers/')),
           format: draft.formats[0],
           publishedYear: draft.publishedYear || null,
           publicationDate: draft.publishedYear || null,
