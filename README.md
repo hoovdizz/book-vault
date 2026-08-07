@@ -13,6 +13,7 @@ Reading state and sessions belong to an individual person and a work or edition.
 ## Highlights
 
 - Household roles: system administrator, household administrator, adult, child, and read-only viewer
+- Household administrators can hide a member's owned collection from the global household view without disabling the account; the member and administrators retain access
 - Private per-person reading notes, status, history, ratings, favorites, goals, and preferred formats
 - ISBN-10/ISBN-13, title, author, camera, USB, and Bluetooth scanner entry
 - Continuous batch scanning with editable review results and intentional duplicate-copy actions
@@ -22,9 +23,12 @@ Reading state and sessions belong to an individual person and a work or edition.
 - Hierarchical buildings, rooms, bookcases, shelves, and bins with printable QR labels
 - Cover, detailed, and compact catalog views with server pagination, saved filters, custom collections, tags, and custom fields
 - Edition-aware duplicate review, series positions including decimals and omnibus roles, and missing-volume indicators
+- Add-book results automatically carry provider series names and volume positions; saving a book creates or reuses the household series and links the work automatically
+- Duplicate warnings distinguish active owned copies from wishlist/backlog requests; metadata-only records do not create false duplicate warnings
 - Historical loans, member or external borrowers, holds, due dates, renewals, overdue/lost/damaged states, and batch check-in
 - CSV import dry runs and mappings for Goodreads, LibraryThing, Libib, CLZ Books, BookBuddy, and generic CSV
 - CSV/JSON/reading/loan exports, downloadable backups, restore preview, and SQLite integrity checks
+- On-demand and scheduled database cleanup removes orphaned catalog links, optimizes SQLite indexes/statistics, runs integrity checks, and records the last maintenance result
 - Installable PWA with a cached application shell and a deliberate offline screen; authenticated data is not placed in the public service-worker cache
 - Light/dark themes, visible keyboard focus, reduced-motion support, labels, responsive layouts, and large touch targets
 
@@ -243,6 +247,14 @@ Camera access is requested only after selecting **Start live camera** in a scann
 
 Under **Collection → Filters → Collection owner**, choose the entire household, your personal copies, unassigned shared household copies, or a specific member. Ownership choices are retained with personal view preferences and saved smart shelves.
 
+Household administrators can use **Settings → Household members → Hide collection** for an account that should not advertise its books in the global household view (for example, a private adult collection or break-glass account). Hidden copies are filtered server-side for other household members, do not appear as selectable global owner filters, and remain visible to the owner and household administrators. This setting does not disable the account, remove books, or affect loans, reading history, backups, or exports.
+
+Use the collection multi-select actions to mark books read, add them to a backlog, mark them unread, move them in the location hierarchy, or remove them from the active collection. Removal archives the copy as previously owned and preserves its historical loan and event records.
+
+Wishlist entries are visible to the household by default and can be filtered by requester for gift shopping. Backlog entries remain personal to the signed-in user. When an ISBN or title matches a wishlist/backlog record but has no owned copies, Book Vault labels it as requested rather than reporting a misleading zero-copy duplicate; you can move the wishlist item to owned or intentionally add another copy.
+
+When a provider identifies a series, the add-book workflow records the canonical, properly capitalized series name and the supplied volume/reading position. The **Series** screen groups tracked works, shows owned, wishlist, and missing states, highlights missing volumes with an amber warning badge, and allows empty series to be deleted by a household administrator.
+
 Location labels are created under **Settings → Hierarchical locations**. Select a batch destination from the hierarchy or scan its Book Vault QR label before scanning the books going there.
 
 ## Metadata and covers
@@ -265,6 +277,8 @@ Household administrators can:
 - preview a restore, review counts and cover files, type an explicit confirmation, and stage it for the next restart;
 - export catalog CSV, household JSON, personal reading JSON, and loan-history CSV;
 - dry-run CSV imports, edit column mappings, review errors/duplicates, and preserve unknown columns in the import report.
+
+From **Administration → Database maintenance**, run cleanup on demand or review the automatic seven-day schedule. Maintenance creates a safety backup before changes, removes orphaned/tombstoned links, runs SQLite optimization and analysis, validates database integrity, and records counts, duration, status, and the last successful run. It never deletes active users, copies, reading state, loans, locations, covers, wishlist entries, or backlog entries.
 
 A restore always creates a pre-restore safety backup first. Never interrupt a container while it is applying a staged restore.
 
