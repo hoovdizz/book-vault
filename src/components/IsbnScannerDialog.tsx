@@ -247,7 +247,7 @@ export default function IsbnScannerDialog({
               ? 'Scan a QR label created in Settings. The selected destination will be applied to every saved physical copy in this batch.'
               : continuous
               ? 'Scan continuously into a review queue. Duplicate scans are called out instead of silently rejected.'
-              : 'Use the live rear camera to scan the barcode above the ISBN. Camera images stay on this device.'}
+              : 'Use the live rear camera to scan the red-line barcode above the ISBN. Align the full 978 or 979 barcode inside the frame; camera images stay on this device.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -256,7 +256,16 @@ export default function IsbnScannerDialog({
             <>
               <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
               {cameraState === 'active' && (
-                <div className="pointer-events-none absolute inset-x-[8%] top-1/2 h-20 -translate-y-1/2 rounded border-2 border-primary shadow-[0_0_0_999px_rgba(0,0,0,0.28)]" />
+                <div
+                  className="pointer-events-none absolute inset-x-[7%] top-1/2 h-24 -translate-y-1/2 rounded border-2 border-white/90 shadow-[0_0_0_999px_rgba(0,0,0,0.34)]"
+                  aria-hidden="true"
+                >
+                  <div className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 bg-red-500 shadow-[0_0_8px_2px_rgba(239,68,68,0.9)]" />
+                  <span className="absolute -left-0.5 -top-0.5 h-5 w-5 border-l-4 border-t-4 border-red-500" />
+                  <span className="absolute -right-0.5 -top-0.5 h-5 w-5 border-r-4 border-t-4 border-red-500" />
+                  <span className="absolute -bottom-0.5 -left-0.5 h-5 w-5 border-b-4 border-l-4 border-red-500" />
+                  <span className="absolute -bottom-0.5 -right-0.5 h-5 w-5 border-b-4 border-r-4 border-red-500" />
+                </div>
               )}
               {cameraState !== 'active' && (
                 <div className="absolute inset-0 grid place-items-center bg-black/55 text-center text-sm text-white/80">
