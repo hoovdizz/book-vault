@@ -382,7 +382,7 @@ function inferredSeriesPosition(seriesValues, seriesName, title = "") {
 
 function seriesBaseName(value) {
   return cleanText(value, 150)
-    .replace(/\s*[,;:-]?\s*(?:#|book\s*|vol(?:ume)?\.?\s*)?\d+(?:\.\d+)?\s*$/i, "")
+    .replace(/\s*[,;:-]?\s*(?:#|books?\s*|vol(?:ume)?\.?\s*)?\d+(?:\.\d+)?\s*$/i, "")
     .trim();
 }
 
@@ -410,15 +410,27 @@ function withInferredSeriesPositions(books) {
   });
 }
 
-function normalizeOpenLibrarySeries(payload, requestedSeries) {
+export function normalizeOpenLibrarySeries(payload, requestedSeries) {
   const candidateNames = (payload?.docs || [])
     .flatMap(document => Array.isArray(document.series) ? document.series : [])
     .map(seriesBaseName)
     .filter(Boolean);
-  const exactName = candidateNames.find(value => value.toLocaleLowerCase() === requestedSeries.toLocaleLowerCase());
-  const containingName = candidateNames.find(value =>
-    value.toLocaleLowerCase().includes(requestedSeries.toLocaleLowerCase()));
-  const seriesName = seriesDisplayName(exactName || containingName || requestedSeries);
+  const queryCore = cleanText(requestedSeries, 150)
+    .replace(/\b(?:series|books?|saga|novels?)\b/gi, " ")
+    .replace(/[^\p{L}\p{Number}]+/gu, " ")
+    .trim()
+    .toLocaleLowerCase();
+  const counts = new Map();
+  for (const candidate of candidateNames) {
+    const normalized = candidate.toLocaleLowerCase();
+    if (!queryCore || normalized.includes(queryCore) || queryCore.includes(normalized)) {
+      counts.set(candidate, (counts.get(candidate) || 0) + 1);
+    }
+  }
+  const bestCandidate = [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].length - right[0].length)[0]?.[0]
+    || candidateNames[0];
+  const seriesName = seriesDisplayName(bestCandidate || requestedSeries);
   return (payload?.docs || []).flatMap(document =>
     normalizeOpenLibraryDocs({ docs: [document] }).map(result => ({
       ...result,

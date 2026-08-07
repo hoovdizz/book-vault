@@ -8,6 +8,7 @@ import {
   normalizeHardcoverBooks,
   normalizeIsbn,
   normalizeOpenLibraryDocs,
+  normalizeOpenLibrarySeries,
   seriesDisplayName,
 } from "./book-search.mjs";
 
@@ -17,6 +18,14 @@ describe("book search normalization", () => {
   it("uses readable capitalization for search fallback series names", () => {
     expect(seriesDisplayName("the wheel of time")).toBe("The Wheel of Time");
     expect(seriesDisplayName("The Wheel of Time")).toBe("The Wheel of Time");
+  });
+
+  it("prefers the provider series label over search wording", () => {
+    const [book] = normalizeOpenLibrarySeries({ docs: [
+      { title: "The Hobbit", series: ["The Hobbit books 1"] },
+      { title: "The Hobbit: An Unexpected Journey", series: ["The Hobbit books 2"] },
+    ] }, "hobbit books");
+    expect(book.series).toBe("The Hobbit");
   });
 
   it("normalizes and validates ISBN-10 and ISBN-13 checksums", () => {
